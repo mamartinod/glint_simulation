@@ -75,7 +75,8 @@ strehl = 1.
 rho = 0.8 * strehl
 opd0 = 1.55/2.
 delta_opd = np.random.normal(0,4., (int(comb(nb_pupils, 2)), nbimg))
-opd = opd0 * np.ones(delta_opd.shape) + delta_opd*0
+delta_opd[:] = 2.
+opd = opd0 * np.ones(delta_opd.shape) + delta_opd
 wave_number0 = 1./(2*opd0) # wave number for which the null is minimal
 
 #==============================================================================
