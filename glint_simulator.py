@@ -9,11 +9,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import comb
 import glint_simulator_classes as classes
+from itertools import combinations
 
 def gaus(x, mu, sigma):
     y = np.exp(-(x - mu)**2/(2 * sigma**2))
     y /= y.sum()
     return y
+
+def chromatic_splitters(ratios, wl_scale, wl0, slope):
+    chroma_ratios = np.zeros((ratios.shape[0], 2, wl_scale.size))
+    chromatism = slope * (wl_scale - wl0)
+    chroma_ratios[:,0] = ratios[:,0,None] + chromatism[None,:]
+    chroma_ratios[:,1] = 1 - chroma_ratios[:,0]
+    
+    problem_gt1 = np.any(chroma_ratios >= 1)
+    problem_lt0 = np.any(chroma_ratios <= 0)
+    if problem_gt1 or problem_lt0:
+        print('Warning : unauthorized values in beam splitter ratios')
+        
+    return chroma_ratios
 
 # =============================================================================
 # Fundamental constants
@@ -37,7 +51,7 @@ sigma_ron = 10. # in e-/px/img
 nbimg = 10
 select_noise = [True, True] # Dark and Readout noises
 
-detector_size = (256, 128) #resp. position axes and wavelength
+detector_size = (344, 96) #resp. position axes and wavelength
 
 channel_width = bandwidth / detector_size[1]
 
@@ -62,10 +76,15 @@ transmission = np.ones((nb_pupils,))*0.01
 # =============================================================================
 # Properties of the integrated optics and injection
 # =============================================================================
-kappa_I1_minus = kappa_I1_plus = (1./0.37-1)/2.
-kappa_I2_minus = kappa_I2_plus = (1/0.43-1)/2.
-splitter_beams = np.array([[0.37, 0.63], [0.43, 0.57], [0.5, 0.5], [0.5, 0.5]]) # one couple per beam. Toward photo and coupler
-splitter_beams = np.ones(splitter_beams.shape) * 0.5
+beam_comb = [str(i)+''+str(j) for i,j in combinations(np.arange(4), 2)]
+beam_splitter = np.array([[0.37, 0.63], [0.43, 0.57], [0.5, 0.5], [0.5, 0.5]]) # one couple per beam. Toward photo and coupler
+beam_splitter = chromatic_splitters(beam_splitter, wl_scale, 1.55, -1.)
+
+couplers_splitter = np.ones((6,2)) * 0.5 # Toward null and anti-null
+couplers_splitter = chromatic_splitters(couplers_splitter, wl_scale, 1.55, 2.)
+
+total_splitter = np.array([[beam_splitter[i,1]*couplers_splitter[beam_comb.index(str(i)+''+str(j)),0], \
+                                   beam_splitter[i,1]*couplers_splitter[beam_comb.index(str(i)+''+str(j)),1]] for i,j in combinations(np.arange(4), 2)])
 rho0 = 0.8
 
 # =============================================================================
@@ -75,9 +94,9 @@ strehl = 1.
 rho = 0.8 * strehl
 opd0 = 1.55/2.
 delta_opd = np.random.normal(0,4., (int(comb(nb_pupils, 2)), nbimg))
-delta_opd[:] = 2.
-opd = opd0 * np.ones(delta_opd.shape) + delta_opd
+opd = opd0 * np.ones(delta_opd.shape) + delta_opd*0
 wave_number0 = 1./(2*opd0) # wave number for which the null is minimal
+phase_bias = 0.1 # Generic phase bias term
 
 #==============================================================================
 # Stars
@@ -114,7 +133,7 @@ idx_count = 0
 for i in liste_pupils:
     N = np.array([QE * surface * channel_width * DIT * np.power(10, -0.4*mag) * flux_ref * wl_scale.mean()*1.E-6 /(h*c)]*detector_size[1])
     photo = np.zeros(image_clean.shape)
-    photo[:] = splitter_beams[i][0] * transmission[i] * photometric_channels[i] * N[None, :] * rho
+    photo[:] = beam_splitter[i][0] * transmission[i] * photometric_channels[i] * N[None, :] * rho
     
     image_clean += photo
     
@@ -124,17 +143,17 @@ for i in liste_pupils:
         beam_j_null = np.zeros(image_clean.shape)
         beam_j_anti_null = np.zeros(image_clean.shape)
         
-        beam_i_null[:] = splitter_beams[i][1]/2. * transmission[i] * null_channels[idx_count] * N[None,:] * rho
-        beam_i_anti_null[:] = splitter_beams[i][1]/2. * transmission[i] * anti_null_channels[idx_count] * N[None,:] * rho
+        beam_i_null[:] = total_splitter[i][0] * transmission[i] * null_channels[idx_count] * N[None,:] * rho
+        beam_i_anti_null[:] = total_splitter[i][1] * transmission[i] * anti_null_channels[idx_count] * N[None,:] * rho
         
-        beam_j_null[:] = splitter_beams[j][1]/2. * transmission[j] * null_channels[idx_count] * N[None,:] * rho
-        beam_j_anti_null[:] = splitter_beams[j][1]/2. * transmission[j] * anti_null_channels[idx_count] * N[None,:] * rho
+        beam_j_null[:] = total_splitter[j][1] * transmission[j] * null_channels[idx_count] * N[None,:] * rho
+        beam_j_anti_null[:] = total_splitter[j][1] * transmission[j] * anti_null_channels[idx_count] * N[None,:] * rho
         
         beams_ij_null = beam_i_null * beam_j_null
         beams_ij_anti_null = beam_i_anti_null * beam_j_anti_null
         
-        cosine_null = np.array([np.cos(2*np.pi*(wave_number)*d) for d in opd[idx_count]])
-        cosine_anti_null = np.array([np.cos(2*np.pi*(wave_number-wave_number0) * d) for d in opd[idx_count]])
+        cosine_null = np.array([np.cos(2*np.pi*(wave_number)*d + phase_bias) for d in opd[idx_count]])
+        cosine_anti_null = - cosine_null
         null_output = beam_i_null + beam_j_null + 2 * np.sqrt(beams_ij_null) * visibility * cosine_null[:,None,:]
         anti_null_output = beam_i_anti_null + beam_j_anti_null + 2 * np.sqrt(beams_ij_anti_null) * visibility * cosine_anti_null[:,None,:]
         
@@ -146,17 +165,17 @@ data_noisy.addNoise(Ndark, gainsys, offset, sigma_ron, active=select_noise, conv
 data = data_noisy.output   
 
 plt.figure()
-plt.imshow(image_clean[0], interpolation='none') 
+plt.imshow(image_clean[0], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], 0, detector_size[0]]) 
 plt.colorbar()
 plt.figure()
-plt.imshow(data[0], interpolation='none') 
+plt.imshow(data[0], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], 0, detector_size[0]]) 
 plt.colorbar()
 
 null = image_clean[:,int(round(null_output_pos[0])),:]
 antinull = image_clean[:,int(round(anti_null_output_pos[0])),:]
 
-plt.figure();plt.plot(null[0]);plt.grid()
-plt.figure();plt.plot(antinull[0]);plt.grid()
+plt.figure();plt.plot(wl_scale, null[0]);plt.grid()
+plt.figure();plt.plot(wl_scale, antinull[0]);plt.grid()
 
 null_fft = np.fft.fftshift(np.fft.fft((null), norm='ortho'))
 anti_fft = np.fft.fftshift(np.fft.fft((antinull), norm='ortho'))
