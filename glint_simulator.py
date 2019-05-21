@@ -4,7 +4,6 @@ Created on Wed Feb 13 16:37:34 2019
 
 @author: mamartinod
 """
-
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import comb
@@ -13,6 +12,7 @@ from itertools import combinations
 import h5py
 import os
 import datetime
+from timeit import default_timer as time
 
 def gaus(x, mu, sigma):
     y = np.exp(-(x - mu)**2/(2 * sigma**2))
@@ -23,7 +23,7 @@ def chromatic_splitters(ratios, wl_scale, wl0, slope):
     chroma_ratios = np.zeros((ratios.shape[0], 2, wl_scale.size))
     chromatism = slope * (wl_scale - wl0)
     chroma_ratios[:,0] = ratios[:,0,None] + chromatism[None,:]
-    chroma_ratios[:,1] = 1 - chroma_ratios[:,0]
+    chroma_ratios[:,1] = ratios[:,0,None] + chromatism[None,:]
         
     return chroma_ratios
 
@@ -44,11 +44,16 @@ def save(arr, path, date, DIT, na, mag):
         f.create_dataset('imagedata', data=arr)
 
 # =============================================================================
-# Execution mode        
+# Settings
 # =============================================================================
 dark_only = False
-save_data = True
-nb_block = 5
+save_data = False
+nb_block = (0, 1)
+nbimg = 3000
+select_noise = [False, False] # Dark and Readout noises
+conversion = False
+path = '/mnt/96980F95980F72D3/glint_data/simulation_nonoise_singleprecision/'
+
 # =============================================================================
 # Fundamental constants
 # =============================================================================
@@ -69,8 +74,6 @@ DIT = 0.002 # in sec
 Ndark = 600 # in e-/px/s
 Ndark *= DIT # in e-/px/fr
 sigma_ron = 10. # in e-/px/fr
-nbimg = 1000
-select_noise = [True, True] # Dark and Readout noises
 
 detector_size = (344, 96) #resp. position axes and wavelength
 
@@ -98,7 +101,7 @@ transmission = np.ones((nb_pupils,))*0.01
 # Properties of the integrated optics and injection
 # =============================================================================
 beam_comb = [str(i)+''+str(j) for i,j in combinations(np.arange(4), 2)]
-beam_splitter = np.array([[0.37, 0.63], [0.43, 0.57], [0.5, 0.5], [0.5, 0.5]]) # one couple per beam. Toward photo and coupler
+#beam_splitter = np.array([[0.37, 0.63], [0.43, 0.57], [0.5, 0.5], [0.5, 0.5]]) # one couple per beam. Toward photo and coupler
 beam_splitter = np.array([[0.5, 0.5], [0.5, 0.5], [0.5, 0.5], [0.5, 0.5]]) # one couple per beam. Toward photo and coupler
 beam_splitter = chromatic_splitters(beam_splitter, wl_scale, 1.55, 0.)
 
@@ -111,11 +114,11 @@ rho0 = 0.8
 # =============================================================================
 # Properties of atmosphere
 # =============================================================================
-strehl = 1.
+np.random.seed(1)
+strehl = np.random.rand(nb_pupils, nbimg)
+strehl[strehl>1] = 1.
 rho = 0.8 * strehl
-opd0 = 1.55/2.
-delta_opd = np.random.normal(0,4., (int(comb(nb_pupils, 2)), nbimg))
-opd = opd0 * np.ones(delta_opd.shape) + delta_opd*0
+opd0 = 1.552/2.
 wave_number0 = 1./(2*opd0) # wave number for which the null is minimal
 phase_bias = -np.pi/2 # Generic phase bias term
 
@@ -123,7 +126,7 @@ phase_bias = -np.pi/2 # Generic phase bias term
 # Stars
 #==============================================================================
 mag = 2.1
-na = 0.
+na = 0.1
 visibility = (1 - na) / (1. + na)
 
 # =============================================================================
@@ -147,8 +150,13 @@ photometric_channels = np.transpose(photometric_channels, [0, 2, 1])
 null_channels = np.transpose(null_channels, [0, 2, 1])
 anti_null_channels = np.transpose(anti_null_channels, [0, 2, 1])
 
-for bl in range(nb_block):
-    print("Generating block %s / %s"%(bl+1,nb_block))
+start0 = time()
+for bl in range(*nb_block):
+    start = time()
+    print("Generating block %s / %s"%(bl+1,nb_block[1]))
+    np.random.seed()
+    delta_opd = np.random.normal(0,0.04, (int(comb(nb_pupils, 2)), nbimg))
+    opd = opd0 * np.ones(delta_opd.shape) + delta_opd
     image_clean = np.zeros((nbimg, detector_size[0], detector_size[1]))
     
     if not dark_only:
@@ -156,7 +164,7 @@ for bl in range(nb_block):
         for i in liste_pupils:
             N = np.array([QE * surface * channel_width * DIT * np.power(10, -0.4*mag) * flux_ref * wl_scale.mean()*1.E-6 /(h*c)]*detector_size[1])
             photo = np.zeros(image_clean.shape)
-            photo[:] = beam_splitter[i][0] * transmission[i] * photometric_channels[i] * N[None, :] * rho
+            photo[:] = beam_splitter[i][0] * transmission[i] * photometric_channels[i] * N[None, :] * rho[i,:,None,None]
             
             image_clean += photo
             
@@ -168,16 +176,16 @@ for bl in range(nb_block):
                 beam_j_null = np.zeros(image_clean.shape)
                 beam_j_anti_null = np.zeros(image_clean.shape)
                 
-                beam_i_null[:] = beam_splitter[i][1] * transmission[i] * null_channels[idx_count] * N[None,:] * rho
-                beam_i_anti_null[:] = beam_splitter[i][1] * transmission[i] * anti_null_channels[idx_count] * N[None,:] * rho
+                beam_i_null[:] = beam_splitter[i][1] * transmission[i] * null_channels[idx_count] * N[None,:] * rho[i,:,None,None]
+                beam_i_anti_null[:] = beam_splitter[i][1] * transmission[i] * anti_null_channels[idx_count] * N[None,:] * rho[i,:,None,None]
                 
-                beam_j_null[:] = beam_splitter[j][1] * transmission[j] * null_channels[idx_count] * N[None,:] * rho
-                beam_j_anti_null[:] = beam_splitter[j][1] * transmission[j] * anti_null_channels[idx_count] * N[None,:] * rho
+                beam_j_null[:] = beam_splitter[j][1] * transmission[j] * null_channels[idx_count] * N[None,:] * rho[j,:,None,None]
+                beam_j_anti_null[:] = beam_splitter[j][1] * transmission[j] * anti_null_channels[idx_count] * N[None,:] * rho[j,:,None,None]
                 
                 beams_ij_null = beam_i_null * beam_j_null
                 beams_ij_anti_null = beam_i_anti_null * beam_j_anti_null
                 
-                sine = np.array([np.sin(2*np.pi*(wave_number)*d + phase_bias) for d in opd[idx_count]])
+                sine = np.array([np.sin(2*np.pi*wave_number*d + phase_bias) for d in opd[idx_count]])
                 null_output = beam_i_null * np.sin(kappa_l)**2 + beam_j_null * np.cos(kappa_l)**2 -\
                 np.sqrt(beams_ij_null) * np.sin(2 * kappa_l) * visibility * sine[:,None,:]
                 
@@ -191,42 +199,55 @@ for bl in range(nb_block):
     # Noising frames
     # =============================================================================
     data_noisy = classes.Noising(nbimg, image_clean)
-    data_noisy.addNoise(Ndark, gainsys, offset, sigma_ron, active=select_noise, convert=True)
-    data = data_noisy.output   
+    data_noisy.addNoise(Ndark, gainsys, offset, sigma_ron, active=select_noise, convert=conversion)
+    data = data_noisy.output
     
     # =============================================================================
     # Save data
     # =============================================================================
     if save_data:
+        if not os.path.exists(path):
+            os.makedirs(path)
+            
         if not dark_only:
-            path = '/mnt/96980F95980F72D3/glint_data/simulation/simu_'+str(mag)+'_%04d.mat'%(bl+1)
+            path2 = path + 'simu_'+str(mag)+'_%04d.mat'%(bl+1)
         else:
-            path = '/mnt/96980F95980F72D3/glint_data/simulation/dark.mat'
+            path2 = path + 'dark.mat'
         
         date = datetime.datetime.utcnow().isoformat()
-        save(np.transpose(data, axes=(0,2,1)), path, date, DIT, na, mag)
+        save(data, path2, date, DIT, na, mag)
+    
+    stop = time()
+    print('Last: %.3f'%(stop-start))
+
+stop0 = time()
+print('Total last: %.3f'%(stop0-start0))
 
 # =============================================================================
 # Miscelleanous
 # =============================================================================
-plt.figure()
-plt.imshow(image_clean[0], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0]) 
-plt.colorbar()
-plt.figure()
-plt.imshow(data[0], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0]) 
-plt.colorbar()
-
 null = image_clean[:,int(round(null_output_pos[0])),:]
 antinull = image_clean[:,int(round(anti_null_output_pos[0])),:]
 p = np.array([image_clean[:,int(round(photo_pos_i)),:] for photo_pos_i in photo_pos])
 
-plt.figure()
-plt.plot(wl_scale, p[0,0], label='P1')
-plt.plot(wl_scale, p[1,0], 'o', label='P2')
-plt.plot(wl_scale, null[0], label='null')
-plt.plot(wl_scale, antinull[0], '.', label='antinull')
-plt.grid()
-plt.legend(loc='best')
+for i in range(min(5, nbimg)):
+    plt.figure()
+    plt.subplot(131)
+    plt.imshow(data[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0],) 
+    plt.colorbar()
+    plt.subplot(132)
+    plt.imshow(image_clean[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0],\
+           vmin=0., vmax=200) 
+    plt.colorbar()
+    plt.subplot(133)
+    plt.plot(wl_scale, p[0,i], label='P1')
+    plt.plot(wl_scale, p[1,i], 'o', label='P2')
+    plt.plot(wl_scale, p[2,i], '+', label='P3')
+    plt.plot(wl_scale, p[3,i], 'x', label='P4')
+    plt.plot(wl_scale, null[i], label='null')
+    plt.plot(wl_scale, antinull[i], '.', label='antinull')
+    plt.grid()
+    plt.legend(loc='best')
 
 null_fft = np.fft.fftshift(np.fft.fft((null), norm='ortho'))
 anti_fft = np.fft.fftshift(np.fft.fft((antinull), norm='ortho'))
@@ -235,7 +256,9 @@ null_dsp, null_phase = abs(null_fft)**2, np.angle(null_fft)
 anti_dsp, anti_phase = abs(anti_fft)**2, np.angle(anti_fft)
 
 #plt.figure()
-#plt.plot(null_phase[0])
+#plt.plot(image_clean[:,329,:].sum(axis=-1)/np.max(image_clean[:,329,:].sum(axis=-1))) # Photo
+#plt.plot(image_clean[:,191,:].sum(axis=-1)/np.max(image_clean[:,191,:].sum(axis=-1))) #Null
+#plt.plot(rho[0]/rho[0].max(), 'o')
 #plt.grid()
 #
 #plt.figure()
