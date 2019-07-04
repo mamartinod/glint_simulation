@@ -47,12 +47,12 @@ def save(arr, path, date, DIT, na, mag):
 # Settings
 # =============================================================================
 dark_only = False
-save_data = False
-nb_block = (0, 1)
+save_data = True
+nb_block = (0, 20)
 nbimg = 3000
-select_noise = [False, False] # Dark and Readout noises
-conversion = False
-path = '/mnt/96980F95980F72D3/glint_data/simulation_nonoise_singleprecision/'
+select_noise = [True, True] # Dark and Readout noises
+conversion = True
+path = '/mnt/96980F95980F72D3/glint_data/simulation_nofluctu/'
 
 # =============================================================================
 # Fundamental constants
@@ -73,17 +73,18 @@ bandwidth = wl_max - wl_min
 DIT = 0.002 # in sec
 Ndark = 600 # in e-/px/s
 Ndark *= DIT # in e-/px/fr
-sigma_ron = 10. # in e-/px/fr
+sigma_ron = 30. # in e-/px/fr
 
+wl_offset = 20 # in pixel, shift of the bandwidth on the detecotr hence a blank in a part of it
 detector_size = (344, 96) #resp. position axes and wavelength
 
-channel_width = bandwidth / detector_size[1]
+channel_width = bandwidth / (detector_size[1])
 
 QE = 0.8
-gainsys = 1./3. # ADU/electron
+gainsys = 0.5 # ADU/electron
 offset = 2750
 
-wl_scale = np.arange(wl_min, wl_max, channel_width)[::-1] #In microns
+wl_scale = np.linspace(wl_min, wl_max, detector_size[1], endpoint=False)[::-1] #In microns
 wave_number = 1/wl_scale # In microns^-1
 position_scale = np.arange(0, detector_size[0]) #In pixel
 
@@ -114,19 +115,16 @@ rho0 = 0.8
 # =============================================================================
 # Properties of atmosphere
 # =============================================================================
-np.random.seed(1)
-strehl = np.random.rand(nb_pupils, nbimg)
-strehl[strehl>1] = 1.
-rho = 0.8 * strehl
-opd0 = 1.552/2.
+
+opd0 = 1.552/4.
 wave_number0 = 1./(2*opd0) # wave number for which the null is minimal
-phase_bias = -np.pi/2 # Generic phase bias term
+phase_bias = 0.#-np.pi/2 # Generic phase bias term
 
 #==============================================================================
 # Stars
 #==============================================================================
-mag = 2.1
-na = 0.1
+mag = 0.
+na = 0.01
 visibility = (1 - na) / (1. + na)
 
 # =============================================================================
@@ -137,7 +135,7 @@ spacing = 1. / (comb(nb_pupils, 2)*2+nb_pupils+1+2)
 photo_pos = [channel_positions[15], channel_positions[13], channel_positions[2], channel_positions[0]]
 null_output_pos = [channel_positions[11], channel_positions[3], channel_positions[1], channel_positions[6], channel_positions[5], channel_positions[8]]
 anti_null_output_pos = [channel_positions[9], channel_positions[12], channel_positions[14], channel_positions[4], channel_positions[7], channel_positions[10]]
-sigma = 1.3
+sigma = 0.9
 
 # =============================================================================
 # Making the clean image
@@ -155,8 +153,18 @@ for bl in range(*nb_block):
     start = time()
     print("Generating block %s / %s"%(bl+1,nb_block[1]))
     np.random.seed()
-    delta_opd = np.random.normal(0,0.04, (int(comb(nb_pupils, 2)), nbimg))
-    opd = opd0 * np.ones(delta_opd.shape) + delta_opd
+    strehl = np.random.normal(0.5, 0.12, size=(nb_pupils, nbimg))
+    while np.min(strehl) < 0 or np.max(strehl) > 1:
+        idx = np.where((strehl<0)|(strehl>1))
+        strehl[idx] = np.random.normal(0.5, 0.12, size=idx[0].size)
+        
+    rho = 0.8 * strehl
+
+    delta_opd = np.random.normal(0,0.4, (int(comb(nb_pupils, 2)), nbimg))
+    opd = opd0 * np.ones(delta_opd.shape) + delta_opd*0
+    opd[4] = opd[0] + opd[1] # 13 = 12 + 23 i.e. N5
+    opd[5] = opd[1] + opd[3] # 24 = 23 + 34 i.e. N6
+    opd[2] = opd[4] + opd[3] # 14 = 13 + 34 i.e. N3
     image_clean = np.zeros((nbimg, detector_size[0], detector_size[1]))
     
     if not dark_only:
@@ -194,6 +202,8 @@ for bl in range(*nb_block):
                 
                 image_clean += null_output + anti_null_output
                 idx_count += 1
+        
+        image_clean[:,:,:wl_offset] = 0
     
     # =============================================================================
     # Noising frames
@@ -212,10 +222,10 @@ for bl in range(*nb_block):
         if not dark_only:
             path2 = path + 'simu_'+str(mag)+'_%04d.mat'%(bl+1)
         else:
-            path2 = path + 'dark.mat'
+            path2 = path + 'dark_%04d.mat'%(bl+1)
         
         date = datetime.datetime.utcnow().isoformat()
-        save(data, path2, date, DIT, na, mag)
+        save(np.transpose(data, axes=(0,2,1)), path2, date, DIT, na, mag)
     
     stop = time()
     print('Last: %.3f'%(stop-start))
@@ -236,8 +246,7 @@ for i in range(min(5, nbimg)):
     plt.imshow(data[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0],) 
     plt.colorbar()
     plt.subplot(132)
-    plt.imshow(image_clean[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0],\
-           vmin=0., vmax=200) 
+    plt.imshow(image_clean[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0]) 
     plt.colorbar()
     plt.subplot(133)
     plt.plot(wl_scale, p[0,i], label='P1')
