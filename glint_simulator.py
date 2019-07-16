@@ -47,11 +47,12 @@ def save(arr, path, date, DIT, na, mag):
 # Settings
 # =============================================================================
 dark_only = False
-save_data = True
-nb_block = (0, 20)
-nbimg = 3000
-select_noise = [True, True] # Dark and Readout noises
-conversion = True
+turbulence = False
+save_data = False
+nb_block = (0, 1)
+nbimg = 1
+select_noise = [False, False] # Dark and Readout noises
+conversion = False
 path = '/mnt/96980F95980F72D3/glint_data/simulation_nofluctu/'
 
 # =============================================================================
@@ -152,15 +153,22 @@ start0 = time()
 for bl in range(*nb_block):
     start = time()
     print("Generating block %s / %s"%(bl+1,nb_block[1]))
-    np.random.seed()
-    strehl = np.random.normal(0.5, 0.12, size=(nb_pupils, nbimg))
-    while np.min(strehl) < 0 or np.max(strehl) > 1:
-        idx = np.where((strehl<0)|(strehl>1))
-        strehl[idx] = np.random.normal(0.5, 0.12, size=idx[0].size)
+    if turbulence:
+        np.random.seed()
+        strehl = np.random.normal(0.5, 0.12, size=(nb_pupils, nbimg))
+        while np.min(strehl) < 0 or np.max(strehl) > 1:
+            idx = np.where((strehl<0)|(strehl>1))
+            strehl[idx] = np.random.normal(0.5, 0.12, size=idx[0].size)
+    else:
+        strehl = np.ones((nb_pupils, nbimg))
         
     rho = 0.8 * strehl
 
-    delta_opd = np.random.normal(0,0.4, (int(comb(nb_pupils, 2)), nbimg))
+    if turbulence:
+        delta_opd = np.random.normal(0,0.4, (int(comb(nb_pupils, 2)), nbimg))
+    else:
+        delta_opd = np.zeros((int(comb(nb_pupils, 2)), nbimg))
+        
     opd = opd0 * np.ones(delta_opd.shape) + delta_opd*0
     opd[4] = opd[0] + opd[1] # 13 = 12 + 23 i.e. N5
     opd[5] = opd[1] + opd[3] # 24 = 23 + 34 i.e. N6
