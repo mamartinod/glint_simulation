@@ -46,6 +46,8 @@ class Noising:
         converted = self.ron.copy()
         if convert:
             self.converted = converted.astype(np.uint16)
+            if np.any(self.converted>2**16):
+                print('WARNING: saturation of the detector')
         else:
             self.converted = converted
         

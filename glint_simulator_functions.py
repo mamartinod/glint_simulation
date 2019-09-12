@@ -82,7 +82,8 @@ def chromatic_splitters(ratios, wl_scale, wl0, slope):
         
     return chroma_ratios
 
-def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl):
+def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl, dark_only_switch, \
+         activate_turbulence, activate_phase_bias, activate_zeta, activate_oversampling, activate_opd_bias):
     # Check if saved file exist
     if os.path.exists(path):
         opening_mode = 'w' # Overwright the whole existing file.
@@ -98,13 +99,17 @@ def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl):
         f.attrs['mag'] = mag
         f.attrs['piston'] = np.array(piston)
         f.attrs['strehl'] = np.array(strehl)
+        f.attrs['dark_only_switch'] = dark_only_switch
+        f.attrs['activate_turbulence'] = activate_turbulence
+        f.attrs['activate_phase_bias'] = activate_phase_bias
+        f.attrs['activate_zeta'] = activate_zeta
+        f.attrs['activate_oversampling'] = activate_oversampling
+        f.attrs['activate_opd_bias'] = activate_opd_bias
         f.create_dataset('imagedata', data=arr)
 
 def setZetaCoeff(wl_scale, path, save):
     with h5py.File(path, 'r') as zeta0:
         wl = np.array(zeta0['wl_scale'])
-        if np.any(wl>1000):
-            wl *= 0.001 # Convert to microns
         
         zeta_minus0 = np.array([[zeta0['b1null1'], zeta0['b2null1']],
                       [zeta0['b1null5'], zeta0['b3null5']],
@@ -125,8 +130,13 @@ def setZetaCoeff(wl_scale, path, save):
         zeta_minus = zeta_minus[:,:,::-1]
         zeta_plus = zeta_plus[:,:,::-1]
         
+#        plt.figure()
+#        plt.plot(wl, zeta0['b1null1'], 'o-')
+#        plt.plot(wl_scale, zeta_minus[0,0], 'o-')
+#        plt.grid()
+        
     if save:
-        with h5py.File('/mnt/96980F95980F72D3/glint/simulation/zeta_coeff2.hdf5', 'w') as newzeta:
+        with h5py.File('/mnt/96980F95980F72D3/glint/simulation/zeta_coeff_simu.hdf5', 'w') as newzeta:
             newzeta.create_dataset('wl_scale', data=wl_scale)
             
             newzeta.create_dataset('b1null1', data=zeta_minus[0,0])
@@ -159,7 +169,7 @@ def setZetaCoeff(wl_scale, path, save):
 
 def rv_gen_doubleGauss(shape, mu1, mu2, sig1, A):
     nsamp = np.prod(shape)
-    x, step = cp.linspace(-25,25, 10000, endpoint=False, retstep=True, dtype=cp.float32)
+    x, step = cp.linspace(-2500,2500, 10000, endpoint=False, retstep=True, dtype=cp.float32)
     cdf = doubleGaussCdf(x, mu1, mu2, sig1, A)
     cdf = cp.asarray(cdf, dtype=cp.float32)
     rv = cp.asnumpy(rv_generator(x, cdf, nsamp))
@@ -167,36 +177,10 @@ def rv_gen_doubleGauss(shape, mu1, mu2, sig1, A):
     return rv
 
 if __name__ == '__main__':
-    from scipy.optimize import curve_fit
-#    x, step = cp.linspace(-100,100, 10000, endpoint=False, retstep=True, dtype=cp.float32)
-#    mu1, mu2, sig1, A = 0, 25, 0.5, 1.
-#    
-#    cdf = doubleGaussCdf(x, mu1, mu2, sig1, A)
-#    cdf = cp.asarray(cdf, dtype=cp.float32)
-#    rv = cp.asnumpy(rv_generator(x, cdf, 1000000))
-
-    x, step = cp.linspace(-25,25, 10000, endpoint=False, retstep=True, dtype=cp.float32)
-    mu1, mu2, sig1, A = 0, 0.8, 0.2, 1.
-    rv = rv_gen_doubleGauss((int(1e+6),), mu1, mu2, sig1, A)
-    edges = cp.asnumpy(x) - step/2
-    edges = np.append(edges, edges[-1]+step)
-    
-    hist, bin_edges = np.histogram(rv, edges, density=True)
-    
-    def doubleGaus(x, mu1, mu2, sig1, A):
-        out = 1/((2*np.pi)**0.5*(sig1+A*sig1)) * (np.exp(-(x-mu1)**2/(2*sig1**2)) + A*np.exp(-(x-mu2)**2/(2*sig1**2)))
-        return out 
-    
-    x_cpu = cp.asnumpy(x)
-    popt, pcov = curve_fit(doubleGaus, x_cpu, hist, [mu1, mu2, sig1, A])
-    print(popt)
-
-#    cdf_cpu = cp.asnumpy(cdf)    
-#    plt.figure()
-#    plt.plot(x_cpu, cdf_cpu)
-#    plt.grid()
-    
+    mu1, mu2, sig1, A = 0, 1602/2, 100, 0.5
+    rv = rv_gen_doubleGauss((int(1e+6),), mu1, mu2, sig1, A)    
+    hist, bin_edges = np.histogram(rv, 1000, density=True)
+        
     plt.figure()
-    plt.plot(x_cpu, hist)
-    plt.plot(x_cpu, cp.asnumpy(doubleGaus(x, *popt)))
+    plt.plot(bin_edges[:-1], hist)
     plt.grid()
