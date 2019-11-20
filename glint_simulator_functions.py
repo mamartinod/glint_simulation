@@ -12,6 +12,7 @@ from cupyx.scipy.special.statistics import ndtr
 import matplotlib.pyplot as plt
 import h5py
 import os
+from scipy.io import savemat
 
 def doubleGaussCdf(x, mu1, mu2, sig, A):
     return 1/(1+A) * ndtr((x-mu1)/(sig)) + A/(1+A) * ndtr((x-mu2)/(sig))
@@ -176,6 +177,18 @@ def rv_gen_doubleGauss(shape, mu1, mu2, sig1, A):
     rv = np.reshape(rv, shape)
     return rv
 
+def save_segment_positions(segment_positions, path):
+    mat_dic = {}
+    mat_dic['PTTPositionFlat'] = np.zeros((37,3))
+    mat_dic['PTTPositionOff'] = np.zeros((37,3))
+    mat_dic['PTTPositionOn'] = np.zeros((37,3))
+    mat_dic['PTTPositionOn'][28,0] = segment_positions[0]/1000 # Convert to microns
+    mat_dic['PTTPositionOn'][34,0] = segment_positions[1]/1000
+    mat_dic['PTTPositionOn'][25,0] = segment_positions[2]/1000
+    mat_dic['PTTPositionOn'][23,0] = segment_positions[3]/1000
+    
+    savemat(path, mat_dic)
+    
 if __name__ == '__main__':
     mu1, mu2, sig1, A = 0, 1602/2, 100, 0.5
     rv = rv_gen_doubleGauss((int(1e+6),), mu1, mu2, sig1, A)    
