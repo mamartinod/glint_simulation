@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import h5py
 import os
 from scipy.io import savemat
+import scipy.special as sp
 
 def doubleGaussCdf(x, mu1, mu2, sig, A):
     return 1/(1+A) * ndtr((x-mu1)/(sig)) + A/(1+A) * ndtr((x-mu2)/(sig))
@@ -84,7 +85,7 @@ def chromatic_splitters(ratios, wl_scale, wl0, slope):
     return chroma_ratios
 
 def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl, dark_only_switch, \
-         activate_turbulence, activate_phase_bias, activate_zeta, activate_oversampling, activate_opd_bias):
+         activate_turbulence_injection, activate_turbulence_piston, activate_phase_bias, activate_zeta, activate_oversampling, activate_opd_bias, ud_diam):
     # Check if saved file exist
     if os.path.exists(path):
         opening_mode = 'w' # Overwright the whole existing file.
@@ -100,8 +101,10 @@ def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl, dark_only_switch,
         f.attrs['mag'] = mag
         f.attrs['piston'] = np.array(piston)
         f.attrs['strehl'] = np.array(strehl)
+        f.attrs['obj size'] = ud_diam
         f.attrs['dark_only_switch'] = dark_only_switch
-        f.attrs['activate_turbulence'] = activate_turbulence
+        f.attrs['activate_turbulence_injection'] = activate_turbulence_injection
+        f.attrs['activate_turbulence_piston'] = activate_turbulence_piston
         f.attrs['activate_phase_bias'] = activate_phase_bias
         f.attrs['activate_zeta'] = activate_zeta
         f.attrs['activate_oversampling'] = activate_oversampling
@@ -188,6 +191,18 @@ def save_segment_positions(segment_positions, path):
     mat_dic['PTTPositionOn'][23,0] = segment_positions[3]/1000
     
     savemat(path, mat_dic)
+    
+
+def Object2Vis(angle, base, lamb):
+    '''
+    angle in mas
+    base in meter
+    lamb in nm
+    '''
+    angle = angle * np.pi / 180. * 0.001 / 3600.
+    arg = np.pi * angle * base / (lamb*1.E-9)
+    
+    return abs(2 * sp.jv(1, arg) / arg)
     
 if __name__ == '__main__':
     mu1, mu2, sig1, A = 0, 1602/2, 100, 0.5
