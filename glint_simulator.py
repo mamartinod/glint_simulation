@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import comb
 import glint_simulator_classes as classes
-from glint_simulator_functions import gaus, setZetaCoeff, save, rv_gen_doubleGauss, save_segment_positions, Object2Vis
+from glint_simulator_functions import gaus, setZetaCoeff, save, rv_gen_doubleGauss, save_segment_positions, createObject
 from itertools import combinations
 import os
 import datetime
@@ -17,20 +17,20 @@ from timeit import default_timer as time
 # =============================================================================
 # Settings
 # =============================================================================
-activate_dark_only = True
+activate_dark_only = False
 activate_scan_null = False
-activate_turbulence_injection = True
-activate_turbulence_piston = True
+activate_turbulence_injection = False
+activate_turbulence_piston = False
 activate_phase_bias = False
 activate_opd_bias = True
 activate_zeta = True
 activate_oversampling = True
 activate_crosstalk = False
-select_noise = [True, True] # Dark and Readout noises
-conversion = True
-nb_block = (0, 2)
+select_noise = [False, False] # Dark and Readout noises
+conversion = False
+nb_block = (0, 1)
 nbimg = 3000
-save_data = True
+save_data = False
 path = '/mnt/96980F95980F72D3/glint_data/20200212_fringe_tracking8/'
 auto_talk_beams = [0, 1]
 scanned_segment = 2
@@ -80,7 +80,7 @@ position_scale = np.arange(0, detector_size[0]) #In pixel
 #==============================================================================
 nb_pupils = 4 # Number of pupils
 liste_pupils = np.arange(nb_pupils) # Id of the pupils
-diam = 1.13 #in meter
+diam = 1.075 #in meter
 central_obs = 0.
 surface = np.pi * (diam**2-central_obs**2) / 4 #en m^2
 transmission = np.array([4.74e-6, 2.20e-6, 4.66e-6, 3.92e-6])*300
@@ -130,6 +130,8 @@ piston_mu = 0
 piston_shift, jump = wl0/2, 0.
 piston_std = 40.
 strehl_mean, strehl_std = 0.7, 0.05
+r0 = 0.2 # @ 500 nm, in meter
+wl_wfs = 0.5e-6
 
 # =============================================================================
 # Crosstalk
@@ -167,8 +169,8 @@ baselines = np.array([5.55, 3.2, 4.65, 6.45, 5.68, 2.15])
 # Stars
 #==============================================================================
 mag = 0.
-ud_diam = 1. # in mas
-visibility = Object2Vis(ud_diam, baselines, 1550)
+ud_diam = 10. # in mas
+visibility = createObject('ud', ud_diam, wl0*1e-9)
 na = (1-visibility) / (1+visibility)
 
 # =============================================================================
@@ -214,38 +216,35 @@ for bl in range(*nb_block):
     if activate_scan_null:
         segment_positions = np.zeros((4, scan_range.size))
         segment_positions[scanned_segment] = scan_range
-    
-    if activate_turbulence_injection:
-        strehl = np.random.normal(strehl_mean, strehl_std, size=(nb_pupils, nbimg))
-        while np.min(strehl) < 0 or np.max(strehl) > 1:
-            idx = np.where((strehl<0)|(strehl>1))
-            strehl[idx] = np.random.normal(0.5, 0.12, size=idx[0].size)
-    else:
-        strehl = np.ones((nb_pupils, nbimg))
         
-#    strehl[:] = strehl[-1]
-    rho = rho0 * strehl
+    if activate_turbulence_injection or activate_turbulence_piston:
+        print('Generating turbulence.')
+        turb = classes.goas(wl0*1e-9, nbimg)
+        diff_phases, strehl = turb.run(r0, wl_wfs, 1)
+        diff_phases = diff_phases * wl0/(2*np.pi)
+        print('Turbulence generated.')
+        del turb
+    
+    if not activate_turbulence_injection:
+        strehl = np.ones((nb_pupils, nbimg))
+    
+    rho = rho0 * strehl    
 
-    if activate_turbulence_piston:
-        if jump != 0:
-            piston_pupils = rv_gen_doubleGauss((4, nbimg), 0., piston_shift, piston_std, jump)
-        else:
-            piston_pupils = np.random.normal(piston_mu, piston_std, (4, nbimg))
-    else:
-        piston_pupils = np.zeros((4, nbimg))
+    if not activate_turbulence_piston:
+        diff_phases = np.zeros((6, nbimg))
         
     opd = np.ones((int(comb(nb_pupils, 2)), nbimg))
 #    opd[0,:] += opd_ramp
     
     # Order of pairs of beams: 12, 31, 14, 23, 42, 34 (N1, N5, N3, N2, N6, N4)
     # Independant pairs: N1: 12, N2: 23, N4: 34
-    opd[0] = opd_bias[0] + 2*(piston_pupils[0] - piston_pupils[1]) + 2*(segment_positions[0] - segment_positions[1]) # N1: 12
-    opd[3] = opd_bias[3] + 2*(piston_pupils[1] - piston_pupils[2]) + 2*(segment_positions[1] - segment_positions[2]) # N2: 23
-    opd[5] = opd_bias[5] + 2*(piston_pupils[2] - piston_pupils[3]) + 2*(segment_positions[2] - segment_positions[3]) # N4: 34
+    opd[0] = opd_bias[0] + diff_phases[0] + 2*(segment_positions[0] - segment_positions[1]) # N1: 12
+    opd[3] = opd_bias[3] + diff_phases[1] + 2*(segment_positions[1] - segment_positions[2]) # N2: 23
+    opd[5] = opd_bias[5] + diff_phases[3] + 2*(segment_positions[2] - segment_positions[3]) # N4: 34
     
-    opd[1] = opd_bias[1] + 2*(piston_pupils[2] - piston_pupils[0]) + 2*(segment_positions[2] - segment_positions[0])# 31 = 32 + 21 = -23 - 12 i.e. N5
-    opd[2] = opd_bias[2] + 2*(piston_pupils[0] - piston_pupils[3]) + 2*(segment_positions[0] - segment_positions[3])# 14 = 13 + 34 = -31 + 34 i.e. N3
-    opd[4] = opd_bias[4] + 2*(piston_pupils[3] - piston_pupils[1]) + 2*(segment_positions[3] - segment_positions[1])# 42 = 43 + 32 = -34 - 23 i.e. N6
+    opd[1] = opd_bias[1] + diff_phases[4] + 2*(segment_positions[2] - segment_positions[0])# 31 = 32 + 21 = -23 - 12 i.e. N5
+    opd[2] = opd_bias[2] + diff_phases[2] + 2*(segment_positions[0] - segment_positions[3])# 14 = 13 + 34 = -31 + 34 i.e. N3
+    opd[4] = opd_bias[4] + diff_phases[5] + 2*(segment_positions[3] - segment_positions[1])# 42 = 43 + 32 = -34 - 23 i.e. N6
 
 #    opd_ramp = np.linspace(0, wl0/2-opd[0,0],nbimg, endpoint=False)
 #    opd[0] += opd_ramp
@@ -353,7 +352,9 @@ output = data - data[:,:,:10].mean()
 Iminus = np.array([output[:,int(round(null_output_pos_i)):int(round(null_output_pos_i+1)),:].sum(axis=1) for null_output_pos_i in null_output_pos])
 Iplus = np.array([output[:,int(round(anti_null_output_pos_i)):int(round(anti_null_output_pos_i+1)),:].sum(axis=1) for anti_null_output_pos_i in anti_null_output_pos])
 p = np.array([output[:,int(round(photo_pos_i)):int(round(photo_pos_i+1)),:].sum(axis=1) for photo_pos_i in photo_pos])
-
+null = Iminus[:,:,(wl_scale>=1400)&(wl_scale<=1650)].sum(axis=-1) / Iplus[:,:,(wl_scale>=1400)&(wl_scale<=1650)].sum(axis=-1)
+['N1', 'N5', 'N3', 'N2', 'N6', 'N4']
+null = np.array([null[0], null[3], null[2], null[5], null[1], null[4]])
 
 if activate_scan_null:
     plt.figure(figsize=(19.20,10.80))
@@ -455,14 +456,17 @@ def animate(i):
     return [im] + [time_text]
 
 anim = animation.FuncAnimation(fig, animate, init_func=init, frames=output.shape[0], interval=10, blit=True)
-#
-#plt.figure()
-#plt.plot(wl_scale, p[0,0]/np.max(p[0,0]), label='p1')
-#plt.plot(wl_scale, p[1,0]/np.max(p[1,0]), label='p2')
-#plt.plot(wl_scale, null[0,0]/np.max(null[0,0]), label='n1')
-#plt.plot(wl_scale, antinull[0,0]/np.max(antinull[0,0]), label='an1')
-#plt.grid()
-#plt.legend(loc='best')
+
+
+plt.figure()
+for i in range(6):
+    plt.subplot(3,2,i+1)
+    plt.plot(null[i])
+    plt.grid()
+    plt.title('Null %s'%(i+1))
+
+print(np.mean(null, axis=1))
+print(np.std(null, axis=1))
 
 #mask = np.where((wl_scale>=1400)&(wl_scale<=1650))[0]
 #wl = wl_scale[mask]

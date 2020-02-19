@@ -193,22 +193,133 @@ def save_segment_positions(segment_positions, path):
     savemat(path, mat_dic)
     
 
-def Object2Vis(angle, base, lamb):
-    '''
-    angle in mas
-    base in meter
-    lamb in nm
-    '''
-    angle = angle * np.pi / 180. * 0.001 / 3600.
-    arg = np.pi * angle * base / (lamb*1.E-9)
+def createObject(kind, *args):
+    """
+    Wrapper for the creation of different kind of objects set by the **kind** parameter.
+    See ``notes`` for more details.
     
-    return abs(2 * sp.jv(1, arg) / arg)
+    :Parameters:
+        **kind: str**
+            kind of object to simulate: ud = uniform disk, binary = binary system of uniform disks
+            
+    :Returns:
+        the outputs of the called function.
+        
+    :**Notes**:
+        ``kind`` accept the following entries:
+            * ``ud`` which parameters are:
+                **angle: float** 
+                    angular diameter of the source in mas
+                **base: float**
+                    length of the baseline, in meter
+                **lamb: float**
+                    observing wavelength, in meter
+                
+                It returns the visibility.
+                
+            * ``binary`` which parameters are:
+                **diam1, diam2: floats**
+                    angular diameters of both components, in mas
+                **F1, F2: floats**
+                    bolometric flux of both components
+                **separation: float**
+                    angular separation between the components, in mas
+                **angular_position: float**
+                    angular position of the component in degree
+                **u, v: floats**
+                    uv-plane coordinates of the baselines
+                **lamb: float**
+                    wavelength in meter
+                
+                It returns the tuple of modulus of the visibility and the phase.
+    """
+    x_mcoord = np.array([2.725, -2.812, -2.469, -0.502]) # x-coordinates of N telescopes in meter
+    y_mcoord = np.array([2.317, 1.685, -1.496, -2.363]) # y-coordinates of N telescopes in meter
+    baseline1 = np.array([x_mcoord[1]-x_mcoord[0], y_mcoord[1]-y_mcoord[0]]) # Null1 (AD)
+    baseline2 = np.array([x_mcoord[2]-x_mcoord[0], y_mcoord[2]-y_mcoord[0]]) # Null2 (AC)
+    baseline3 = np.array([x_mcoord[1]-x_mcoord[3], y_mcoord[1]-y_mcoord[3]]) # Null3 (BD)
+    baseline4 = np.array([x_mcoord[3]-x_mcoord[2], y_mcoord[3]-y_mcoord[2]]) # Null4 (CB)
+    baseline5 = np.array([x_mcoord[2]-x_mcoord[1], y_mcoord[2]-y_mcoord[1]]) # Null5 (DC)
+    baseline6 = np.array([x_mcoord[3]-x_mcoord[0], y_mcoord[3]-y_mcoord[0]]) # Null6 (BA)
+    baselines = np.array([baseline1, baseline2, baseline3, baseline4, baseline5, baseline6])
+    
+    if kind == 'ud':
+        bl = np.hypot(baselines[:,0], baselines[:,1])
+        diameter, wl = args
+        vis = createUD(bl, diameter, wl)
+        return abs(vis)
+    elif kind == 'binary':
+        diam1, diam2, F1, F2, separation, angular_position, lamb = args
+        u, v = baselines[:,0]/lamb, baselines[:,1]/lamb
+        vis, phase = createBinary(diam1, diam2, F1, F2, separation, angular_position, u, v, lamb)
+        return vis, phase
+    else:
+        raise NameError('Unknown kind of object to create. Please choose between \'ud\' and \'binary\'.')
+    
+def createUD(base, angle, lamb):
+    """
+    Creates a uniform disk.
+    :Parameters:
+        **angle: float** 
+            angular diameter of the source in mas
+        **base: float**
+            length of the baseline, in meter
+        **lamb: float**
+            observing wavelength, in meter
+    """
+    angle = angle * np.pi / 180. * 0.001 / 3600.
+    arg = np.pi * angle * base / (lamb)
+    
+    return 2 * sp.jv(1, arg) / arg
+
+def createBinary(diam1, diam2, F1, F2, separation, angular_position, u, v, lamb):
+    """
+    Create a binary system of two uniform disks.
+    
+    :Parameters:
+        **diam1, diam2: floats**
+            angular diameters of both components, in mas
+        **F1, F2: floats**
+            bolometric flux of both components
+        **separation: float**
+            angular separation between the components, in mas
+        **angular_position: float**
+            angular position of the component in degree
+        **u, v: floats**
+            uv-plane coordinates of the baselines
+        **lamb: float**
+            wavelength in meter
+        
+    :Returns:
+        * a tuple with the absolute values of the visibilities per baselines and the phase (in degree)
+    """
+    B = np.sqrt(u**2+v**2)
+    u /= lamb
+    v /= lamb
+    disk1 = createUD(B, diam1, lamb)
+    disk2 = createUD(B, diam2, lamb)
+    angular_position = angular_position * np.pi/180
+    x = separation * np.cos(angular_position)
+    y = separation * np.sin(angular_position)
+    x = x * np.pi / 180. * 0.001 / 3600.
+    y = y * np.pi / 180. * 0.001 / 3600.
+    binary = (F1 * disk1 + F2*disk2 * np.exp(2.j*(np.pi/lamb)*(u*x + v*y))) / (F1+F2)
+    return abs(binary), np.angle(binary, deg=1)
+    
     
 if __name__ == '__main__':
-    mu1, mu2, sig1, A = 0, 1602/2, 100, 0.5
-    rv = rv_gen_doubleGauss((int(1e+6),), mu1, mu2, sig1, A)    
-    hist, bin_edges = np.histogram(rv, 1000, density=True)
-        
-    plt.figure()
-    plt.plot(bin_edges[:-1], hist)
-    plt.grid()
+    x_mcoord = np.array([2.725, -2.812, -2.469, -0.502]) # x-coordinates of N telescopes in meter
+    y_mcoord = np.array([2.317, 1.685, -1.496, -2.363]) # y-coordinates of N telescopes in meter
+    baseline1 = np.array([x_mcoord[1]-x_mcoord[0], y_mcoord[1]-y_mcoord[0]]) # Null1 (AD)
+    baseline2 = np.array([x_mcoord[2]-x_mcoord[0], y_mcoord[2]-y_mcoord[0]]) # Null2 (AC)
+    baseline3 = np.array([x_mcoord[1]-x_mcoord[3], y_mcoord[1]-y_mcoord[3]]) # Null3 (BD)
+    baseline4 = np.array([x_mcoord[3]-x_mcoord[2], y_mcoord[3]-y_mcoord[2]]) # Null4 (CB)
+    baseline5 = np.array([x_mcoord[2]-x_mcoord[1], y_mcoord[2]-y_mcoord[1]]) # Null5 (DC)
+    baseline6 = np.array([x_mcoord[3]-x_mcoord[0], y_mcoord[3]-y_mcoord[0]]) # Null6 (BA)
+    baselines = np.array([baseline1, baseline2, baseline3, baseline4, baseline5, baseline6])
+
+    diam1, diam2, F1, F2, separation, angular_position, lamb = 1, 1, 1, 1, 10, 0, 1557e-9
+    u, v = baselines[:,0]/lamb, baselines[:,1]/lamb
+    vis, phase = createBinary(diam1, diam2, F1, F2, separation, angular_position, u, v, lamb)
+    print(abs(vis), phase)
+    print(createObject('binary', diam1, diam2, F1, F2, separation, angular_position,lamb))
