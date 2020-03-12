@@ -19,8 +19,8 @@ from timeit import default_timer as time
 # =============================================================================
 activate_dark_only = False
 activate_scan_null = False
-activate_turbulence_injection = False
-activate_turbulence_piston = False
+activate_turbulence_injection = True
+activate_turbulence_piston = True
 activate_phase_bias = False
 activate_opd_bias = True
 activate_zeta = True
@@ -28,10 +28,10 @@ activate_oversampling = True
 activate_crosstalk = False
 select_noise = [False, False] # Dark and Readout noises
 conversion = False
-nb_block = (0, 1)
-nbimg = 3000
+nb_block = (0, 10)
+nbimg = 2000
 save_data = False
-path = '/mnt/96980F95980F72D3/glint_data/20200212_fringe_tracking8/'
+path = '/mnt/96980F95980F72D3/glint_data/20200212_fringe_tracking9/'
 auto_talk_beams = [0, 1]
 scanned_segment = 2
 scan_bounds = (-2500, 2500) # In nm
@@ -130,8 +130,8 @@ piston_mu = 0
 piston_shift, jump = wl0/2, 0.
 piston_std = 40.
 strehl_mean, strehl_std = 0.7, 0.05
-r0 = 0.2 # @ 500 nm, in meter
-wl_wfs = 0.5e-6
+r0 = 0.3 # @ 500 nm, in meter, roughly sr=0.9..0.95 at 1.5 microns
+wl_wfs = 500e-9
 
 # =============================================================================
 # Crosstalk
@@ -168,8 +168,8 @@ baselines = np.array([5.55, 3.2, 4.65, 6.45, 5.68, 2.15])
 #==============================================================================
 # Stars
 #==============================================================================
-mag = 0.
-ud_diam = 10. # in mas
+mag = -1.57
+ud_diam = 30. # in mas
 visibility = createObject('ud', ud_diam, wl0*1e-9)
 na = (1-visibility) / (1+visibility)
 
@@ -457,6 +457,8 @@ def animate(i):
 
 anim = animation.FuncAnimation(fig, animate, init_func=init, frames=output.shape[0], interval=10, blit=True)
 
+histo = np.histogram(2*np.pi/wl0*opd[0], int(opd[0].size**0.5), density=True)
+plt.figure();plt.plot(histo[1][:-1], histo[0]);plt.grid()
 
 plt.figure()
 for i in range(6):
@@ -465,8 +467,6 @@ for i in range(6):
     plt.grid()
     plt.title('Null %s'%(i+1))
 
-print(np.mean(null, axis=1))
-print(np.std(null, axis=1))
 
 #mask = np.where((wl_scale>=1400)&(wl_scale<=1650))[0]
 #wl = wl_scale[mask]
