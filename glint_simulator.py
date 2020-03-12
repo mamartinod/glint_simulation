@@ -19,8 +19,9 @@ from timeit import default_timer as time
 # =============================================================================
 activate_dark_only = False
 activate_scan_null = False
-activate_turbulence_injection = True
-activate_turbulence_piston = True
+activate_turbulence_injection = False
+activate_turbulence_piston = False
+activate_advanced_turb = False
 activate_phase_bias = False
 activate_opd_bias = True
 activate_zeta = True
@@ -28,10 +29,10 @@ activate_oversampling = True
 activate_crosstalk = False
 select_noise = [False, False] # Dark and Readout noises
 conversion = False
-nb_block = (0, 10)
-nbimg = 2000
+nb_block = (0, 1)
+nbimg = 100
 save_data = False
-path = '/mnt/96980F95980F72D3/glint_data/20200212_fringe_tracking9/'
+path = '/mnt/96980F95980F72D3/glint_data/20200312_fringetracking/'
 auto_talk_beams = [0, 1]
 scanned_segment = 2
 scan_bounds = (-2500, 2500) # In nm
@@ -124,7 +125,7 @@ segment_positions[0] = 830.
 segment_positions[2] = 1055.
 
 # =============================================================================
-# Properties of atmosphere
+# Properties of atmosphere - Gaussian model
 # =============================================================================
 piston_mu = 0
 piston_shift, jump = wl0/2, 0.
@@ -217,22 +218,38 @@ for bl in range(*nb_block):
         segment_positions = np.zeros((4, scan_range.size))
         segment_positions[scanned_segment] = scan_range
         
-    if activate_turbulence_injection or activate_turbulence_piston:
+    if activate_advanced_turb:
         print('Generating turbulence.')
         turb = classes.goas(wl0*1e-9, nbimg)
         diff_phases, strehl = turb.run(r0, wl_wfs, 1)
         diff_phases = diff_phases * wl0/(2*np.pi)
         print('Turbulence generated.')
         del turb
-    
-    if not activate_turbulence_injection:
-        strehl = np.ones((nb_pupils, nbimg))
-    
-    rho = rho0 * strehl    
-
-    if not activate_turbulence_piston:
-        diff_phases = np.zeros((6, nbimg))
+        if not activate_turbulence_injection:
+            strehl = np.ones((nb_pupils, nbimg))
+        if not activate_turbulence_piston:
+            diff_phases = np.zeros((6, nbimg))
+    else:
+        if activate_turbulence_injection:
+            strehl = np.random.normal(strehl_mean, strehl_std, size=(nb_pupils, nbimg))
+            while np.min(strehl) < 0 or np.max(strehl) > 1:
+                idx = np.where((strehl<0)|(strehl>1))
+                strehl[idx] = np.random.normal(0.5, 0.12, size=idx[0].size)
+        else:
+            strehl = np.ones((nb_pupils, nbimg))
         
+        if activate_turbulence_piston:
+            piston_pupils = np.random.normal(piston_mu, piston_std, (4, nbimg))
+            diff_phases = np.array([piston_pupils[0]-piston_pupils[1],
+                                    piston_pupils[1]-piston_pupils[2],
+                                    piston_pupils[0]-piston_pupils[3],
+                                    piston_pupils[2]-piston_pupils[3],
+                                    piston_pupils[2]-piston_pupils[1],
+                                    piston_pupils[3]-piston_pupils[1]])
+        else:
+            diff_phases = np.zeros((6, nbimg))
+
+    rho = rho0 * strehl    
     opd = np.ones((int(comb(nb_pupils, 2)), nbimg))
 #    opd[0,:] += opd_ramp
     
