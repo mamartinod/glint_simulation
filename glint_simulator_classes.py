@@ -179,22 +179,16 @@ class goas(object):
             self.phase = np.array(self.phase, dtype=np.float32)
         else:
             self.phase = np.zeros((self.nfr, self.isz,self.isz), dtype=np.float32)
-            
-#    def getImage(self):
-#        fft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(self.pupil*np.exp(1j*self.phase), axes=(-2,-1))), axes=(-2,-1)) / np.sqrt(np.prod(self.pupil.shape[1:]))
-#        fep = np.power(np.abs(fft),2)
-#        self.fft, self.fep = fft, fep
-#        fto = np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(fep, axes=(-2,-1))), axes=(-2,-1)) * np.sqrt(np.prod(fep.shape[1:]))
-#
-#        fft_calib = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(self.pupil, axes=(-2,-1))), axes=(-2,-1)) / np.sqrt(np.prod(self.pupil.shape[1:]))
-#        fep_calib = np.power(np.abs(fft_calib),2)
-#        self.fto_calib = np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(fep_calib, axes=(-2,-1))), axes=(-2,-1)) * np.sqrt(np.prod(fep_calib.shape[1:]))
-#        
-#        self.tf_img = fto * self.tf_obj[None,:,:]
-##        self.img = np.abs(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(self.tf_img, axes=(-2,-1))), axes=(-2,-1))) * np.sqrt(np.prod(self.tf_obj.shape[1:]))
-        
+                    
     def extractFringePeaks(self):
-        fft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(self.pupil*np.exp(1j*self.phase), axes=(-2,-1))), axes=(-2,-1)) / np.sqrt(np.prod(self.pupil.shape[1:]))
+        phased_pupil = np.zeros_like(self.pupil*np.exp(1j*self.phase))
+        for k in range(4):
+            x0, y0 = int(np.around(self.x_pcoord[k]+self.isz/2)), int(np.around(self.y_pcoord[k]+self.isz/2))
+            y_span, x_span = (y0-int(self.prad), y0+int(self.prad)), (x0-int(self.prad), x0+int(self.prad))
+            # We take the average of the phase as beams are injected into single-mode waveguides which only keep the piston mode of the wavefront
+            phased_pupil[:,y_span[0]:y_span[1], x_span[0]:x_span[1]] = self.pupil[y_span[0]:y_span[1], x_span[0]:x_span[1]] * np.exp(1j*np.mean(self.phase[:,y_span[0]:y_span[1], x_span[0]:x_span[1]], axis=(1,2))[:,None,None])
+        
+        fft = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(phased_pupil, axes=(-2,-1))), axes=(-2,-1)) / np.sqrt(np.prod(self.pupil.shape[1:]))
         fep = np.power(np.abs(fft),2)
         fto = np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(fep, axes=(-2,-1))), axes=(-2,-1)) * np.sqrt(np.prod(fep.shape[1:]))
  
@@ -256,7 +250,7 @@ if __name__ == '__main__':
     r0 = 0.3
     seeing = wl_wfs/r0 * 180/np.pi*3600
     print('Seeing at %.2E nm: %.3f arcsec'%(wl_wfs*1e+9, seeing))
-    plop = goas(wl1, 1000)
+    plop = goas(wl1, 1)
     plop.createObject(sz,sz,[0,0], [0,0])
     print('object created')
     plop.generateAtmosphere(r0, wl_wfs, 1)
@@ -273,28 +267,28 @@ if __name__ == '__main__':
 #    plop2.estimateStrehl(plot=False)
 #    z2 = plop2.run(0.15, 0.5e-6, 0)    
     
-    histo = np.histogram(phases, int(phases.shape[1]**0.5), density=True)
-    print(phases.std(axis=1)*wl1*1e+6/(2*np.pi))
-    plt.figure();plt.plot(histo[1][:-1], histo[0]);plt.grid()
-    print(strehls.mean(axis=1))
-#    histo = np.histogram(strehls, int(strehls.shape[1]**0.5), density=True)
-#    plt.figure();plt.plot(histo[1][:-1], histo[0]);plt.grid()
+#     histo = np.histogram(phases, int(phases.shape[1]**0.5), density=True)
+#     print(phases.std(axis=1)*wl1*1e+6/(2*np.pi))
+#     plt.figure();plt.plot(histo[1][:-1], histo[0]);plt.grid()
+#     print(strehls.mean(axis=1))
+# #    histo = np.histogram(strehls, int(strehls.shape[1]**0.5), density=True)
+# #    plt.figure();plt.plot(histo[1][:-1], histo[0]);plt.grid()
     
-    output = np.abs(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(plop.tf_img, axes=(-2,-1))), axes=(-2,-1))) * np.sqrt(np.prod(plop.tf_obj.shape[1:]))
-    from matplotlib import animation
-    fig = plt.figure()
-    ax = plt.axes()
-    time_text = ax.text(0.05, 0.01, '', transform=ax.transAxes, color='w')
-    im = plt.imshow(output[0],interpolation='none')
-    # initialization function: plot the background of each frame
-    def init():
-        im.set_data(output[0])
-        time_text.set_text('')
-        return [im] + [time_text]
-    # animation function.  This is called sequentially
-    def animate(i):
-        im.set_array(output[i])
-        time_text.set_text('Frame %s/%s'%(i+1, output.shape[0]))
-        return [im] + [time_text]
+#     output = np.abs(np.fft.fftshift(np.fft.ifft2(np.fft.fftshift(plop.tf_img, axes=(-2,-1))), axes=(-2,-1))) * np.sqrt(np.prod(plop.tf_obj.shape[1:]))
+#     from matplotlib import animation
+#     fig = plt.figure()
+#     ax = plt.axes()
+#     time_text = ax.text(0.05, 0.01, '', transform=ax.transAxes, color='w')
+#     im = plt.imshow(output[0],interpolation='none')
+#     # initialization function: plot the background of each frame
+#     def init():
+#         im.set_data(output[0])
+#         time_text.set_text('')
+#         return [im] + [time_text]
+#     # animation function.  This is called sequentially
+#     def animate(i):
+#         im.set_array(output[i])
+#         time_text.set_text('Frame %s/%s'%(i+1, output.shape[0]))
+#         return [im] + [time_text]
     
-    anim = animation.FuncAnimation(fig, animate, init_func=init, frames=output.shape[0], interval=500, blit=True) 
+#     anim = animation.FuncAnimation(fig, animate, init_func=init, frames=output.shape[0], interval=500, blit=True) 

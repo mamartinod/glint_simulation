@@ -111,7 +111,7 @@ def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl, dark_only_switch,
         f.attrs['activate_opd_bias'] = activate_opd_bias
         f.create_dataset('imagedata', data=arr)
 
-def setZetaCoeff(wl_scale, path, save):
+def setZetaCoeff(wl_scale, path, save, plot):
     with h5py.File(path, 'r') as zeta0:
         wl = np.array(zeta0['wl_scale'])
         
@@ -134,10 +134,14 @@ def setZetaCoeff(wl_scale, path, save):
         zeta_minus = zeta_minus[:,:,::-1]
         zeta_plus = zeta_plus[:,:,::-1]
         
-#        plt.figure()
-#        plt.plot(wl, zeta0['b1null1'], 'o-')
-#        plt.plot(wl_scale, zeta_minus[0,0], 'o-')
-#        plt.grid()
+        zeta_minus[zeta_minus<0] = 0
+        zeta_plus[zeta_plus<0] = 0
+        
+        if plot:
+            plt.figure()
+            plt.plot(wl, zeta0['b1null1'], 'o-')
+            plt.plot(wl_scale, zeta_minus[0,0], 'o-')
+            plt.grid()
         
     if save:
         with h5py.File('/mnt/96980F95980F72D3/glint/simulation/zeta_coeff_simu.hdf5', 'w') as newzeta:
@@ -306,6 +310,10 @@ def createBinary(diam1, diam2, F1, F2, separation, angular_position, u, v, lamb)
     binary = (F1 * disk1 + F2*disk2 * np.exp(2.j*(np.pi/lamb)*(u*x + v*y))) / (F1+F2)
     return abs(binary), np.angle(binary, deg=1)
     
+def skewedGaussian(x, a, loc, sig, skew):
+    gaus = a * np.exp(-(x-loc)**2/(2*sig**2))
+    cdf = sp.ndtr(skew * (x-loc)/sig) * a
+    return 2 * gaus * cdf
     
 if __name__ == '__main__':
     x_mcoord = np.array([2.725, -2.812, -2.469, -0.502]) # x-coordinates of N telescopes in meter

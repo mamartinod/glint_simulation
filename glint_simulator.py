@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.special import comb
 import glint_simulator_classes as classes
-from glint_simulator_functions import gaus, setZetaCoeff, save, rv_gen_doubleGauss, save_segment_positions, createObject
+from glint_simulator_functions import gaus, setZetaCoeff, save, createObject, skewedGaussian
 from itertools import combinations
 import os
 import datetime
@@ -25,14 +25,16 @@ activate_advanced_turb = False
 activate_phase_bias = False
 activate_opd_bias = True
 activate_zeta = True
+activate_transmission = False
+activate_spectrum = True
 activate_oversampling = True
 activate_crosstalk = False
 select_noise = [False, False] # Dark and Readout noises
 conversion = False
 nb_block = (0, 1)
-nbimg = 100
+nbimg = 1
 save_data = False
-path = '/mnt/96980F95980F72D3/glint_data/20200312_fringetracking/'
+path = '/mnt/96980F95980F72D3/glint_data/20200312_fringetracking_injection_variation_spectrum/'
 auto_talk_beams = [0, 1]
 scanned_segment = 2
 scan_bounds = (-2500, 2500) # In nm
@@ -42,7 +44,7 @@ scan_bounds = (-2500, 2500) # In nm
 # =============================================================================
 c = 3.0E+8 #m/s
 h = 6.63E-34 #J.s
-flux_ref = 1.8E-11 #Reference flux in W/m^2/nm
+flux_ref = 1.26E-12 #Reference flux in W/m^2/nm
 wl0 = 1557#1602
 opd0 = wl0/4.
 
@@ -84,7 +86,10 @@ liste_pupils = np.arange(nb_pupils) # Id of the pupils
 diam = 1.075 #in meter
 central_obs = 0.
 surface = np.pi * (diam**2-central_obs**2) / 4 #en m^2
-transmission = np.array([4.74e-6, 2.20e-6, 4.66e-6, 3.92e-6])*300
+if activate_transmission:
+    transmission = np.array([4.74e-6, 2.20e-6, 4.66e-6, 3.92e-6])*300
+else:
+    transmission = np.ones(4)
 
 # =============================================================================
 # Properties of the integrated optics and injection
@@ -92,6 +97,10 @@ transmission = np.array([4.74e-6, 2.20e-6, 4.66e-6, 3.92e-6])*300
 beam_comb = [str(i)+''+str(j) for i, j in combinations(np.arange(4), 2)]
 
 rho0 = 0.8
+
+segment_positions = np.zeros(4,)
+segment_positions[0] = 830.
+segment_positions[2] = 1055.
 
 # Order of pairs of beams: 12, 31, 14, 23, 42, 34 (N1, N5, N3, N2, N6, N4)
 if activate_opd_bias:
@@ -108,6 +117,7 @@ else:
     opd_bias[1] = -opd_bias[3] - opd_bias[0]  # 31 = 32 + 21 = -23 - 12 i.e. N5
     opd_bias[2] = -opd_bias[1] + opd_bias[5] # 14 = 13 + 34 = -31 + 34 i.e. N3
     opd_bias[4] = -opd_bias[5] - opd_bias[3] # 42 = 43 + 32 = -34 - 23 i.e. N6
+    segment_positions = np.zeros(4,)
 
 if activate_phase_bias:
     phase_bias = np.zeros(6)
@@ -120,9 +130,7 @@ if activate_phase_bias:
 else:
     phase_bias = np.zeros(6,)
     
-segment_positions = np.zeros(4,)
-segment_positions[0] = 830.
-segment_positions[2] = 1055.
+
 
 # =============================================================================
 # Properties of atmosphere - Gaussian model
@@ -132,7 +140,8 @@ piston_shift, jump = wl0/2, 0.
 piston_std = 40.
 strehl_mean, strehl_std = 0.7, 0.05
 r0 = 0.3 # @ 500 nm, in meter, roughly sr=0.9..0.95 at 1.5 microns
-wl_wfs = 500e-9
+wl_wfs = 500e-9 # wavelength of the wavefront sensor
+wind_speed = 10 # wind speed in m/s
 
 # =============================================================================
 # Crosstalk
@@ -170,8 +179,11 @@ baselines = np.array([5.55, 3.2, 4.65, 6.45, 5.68, 2.15])
 # Stars
 #==============================================================================
 mag = -1.57
-ud_diam = 30. # in mas
-visibility = createObject('ud', ud_diam, wl0*1e-9)
+ud_diam = 0. # in mas
+if ud_diam != 0:
+    visibility = createObject('ud', ud_diam, wl0*1e-9)
+else:
+    visibility = np.ones(6)
 na = (1-visibility) / (1+visibility)
 
 # =============================================================================
@@ -190,12 +202,11 @@ anti_null_channels = np.transpose(anti_null_channels, [0, 2, 1])
 #anti_null_channels /= np.sum(anti_null_channels, axis=(-1,-2))[:,None,None]
 
 if activate_zeta:
-    zeta_minus, zeta_plus = setZetaCoeff(wl_scale, '/mnt/96980F95980F72D3/glint/reduction/calibration_params_simu/zeta_coeff.hdf5', save=False)
+    zeta_minus, zeta_plus = setZetaCoeff(wl_scale, '/mnt/96980F95980F72D3/glint/reduction/calibration_params_simu/zeta_coeff.hdf5', save=False, plot=False)
 else:
     zeta_minus = np.ones((6,2,96))
     zeta_plus = np.ones((6,2,96))
     
-
 if activate_scan_null:
     scan_range = np.linspace(scan_bounds[0], scan_bounds[1], 1001)
     nbimg = scan_range.size
@@ -249,9 +260,10 @@ for bl in range(*nb_block):
         else:
             diff_phases = np.zeros((6, nbimg))
 
-    rho = rho0 * strehl    
+    strehl[0] = np.linspace(0.1, 1., nbimg)
+    np.savetxt(path+'strehl.txt', strehl)
+    rho = rho0 * strehl
     opd = np.ones((int(comb(nb_pupils, 2)), nbimg))
-#    opd[0,:] += opd_ramp
     
     # Order of pairs of beams: 12, 31, 14, 23, 42, 34 (N1, N5, N3, N2, N6, N4)
     # Independant pairs: N1: 12, N2: 23, N4: 34
@@ -263,15 +275,30 @@ for bl in range(*nb_block):
     opd[2] = opd_bias[2] + diff_phases[2] + 2*(segment_positions[0] - segment_positions[3])# 14 = 13 + 34 = -31 + 34 i.e. N3
     opd[4] = opd_bias[4] + diff_phases[5] + 2*(segment_positions[3] - segment_positions[1])# 42 = 43 + 32 = -34 - 23 i.e. N6
 
-#    opd_ramp = np.linspace(0, wl0/2-opd[0,0],nbimg, endpoint=False)
-#    opd[0] += opd_ramp
+    opd_ramp = np.linspace(-wl0-opd[0,0], wl0-opd[0,0],nbimg, endpoint=False)
+    # opd[0] += opd_ramp
+    np.savetxt(path+'opd.txt', opd_ramp)
     
     image_clean = np.zeros((nbimg, detector_size[0], detector_size[1]))
     
     if not activate_dark_only:
         idx_count = 0
+        if activate_spectrum:
+            flat_spectrum = np.ones(detector_size[1])
+            flat_spectrum[:wl_offset] = 0.
+            spectrum = skewedGaussian(wl_scale, 1., wl_scale.mean(), 50, -1)
+            spectrum = spectrum / np.sum(spectrum) * np.sum(flat_spectrum)
+            wl_offset = 0
+            plt.figure()
+            plt.plot(wl_scale, spectrum)
+            plt.grid()
+            plt.title('Spectrum')
+        else:
+            spectrum = np.ones(detector_size[1])
+            spectrum[:wl_offset] = 0.
+            
         for i in liste_pupils:
-            N = QE * surface * channel_width * DIT * np.power(10, -0.4*mag) * flux_ref * wl_scale.mean()*1.E-9 /(h*c) * np.ones(detector_size[1])
+            N = QE * surface * channel_width * DIT * np.power(10, -0.4*mag) * flux_ref * wl_scale.mean()*1.E-9 /(h*c) * spectrum
             photo = np.zeros(image_clean.shape)
             photo[:] = transmission[i] * photometric_channels[i] * N[None, :] * rho[i,:,None,None]
             
@@ -323,11 +350,9 @@ for bl in range(*nb_block):
                 
                 anti_null_output = beam_i_anti_null * zeta_antinull_i + beam_j_anti_null * zeta_antinull_j + \
                 2*np.sqrt(beams_ij_anti_null) * np.sqrt(zeta_antinull_i * zeta_antinull_j) * visibility[idx_count] * sine[:,None,:]
-
+                    
                 image_clean += null_output + anti_null_output
                 idx_count += 1
-        
-        image_clean[:,:,:wl_offset] = 0
     
     # =============================================================================
     # Noising frames
@@ -475,7 +500,10 @@ def animate(i):
 anim = animation.FuncAnimation(fig, animate, init_func=init, frames=output.shape[0], interval=10, blit=True)
 
 histo = np.histogram(2*np.pi/wl0*opd[0], int(opd[0].size**0.5), density=True)
-plt.figure();plt.plot(histo[1][:-1], histo[0]);plt.grid()
+plt.figure()
+plt.plot(histo[1][:-1], histo[0])
+plt.grid()
+plt.title('Histogram of OPD (N1)')
 
 plt.figure()
 for i in range(6):
@@ -484,7 +512,7 @@ for i in range(6):
     plt.grid()
     plt.title('Null %s'%(i+1))
 
-
+    
 #mask = np.where((wl_scale>=1400)&(wl_scale<=1650))[0]
 #wl = wl_scale[mask]
 #
