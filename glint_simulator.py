@@ -19,24 +19,26 @@ from timeit import default_timer as time
 # =============================================================================
 activate_dark_only = False
 activate_scan_null = False
-activate_turbulence_injection = False
-activate_turbulence_piston = False
+activate_turbulence_injection = True
+activate_turbulence_piston = True
 activate_advanced_turb = False
 activate_phase_bias = False
 activate_opd_bias = True
 activate_zeta = True
-activate_transmission = False
-activate_spectrum = True
+#activate_transmission = False
+activate_spectrum = False
 activate_oversampling = True
 activate_crosstalk = False
-select_noise = [False, False] # Dark and Readout noises
-conversion = False
-nb_block = (0, 1)
-nbimg = 1
-save_data = False
-path = '/mnt/96980F95980F72D3/glint_data/20200312_fringetracking_injection_variation_spectrum/'
+select_noise = [True, True] # Dark and Readout noises
+conversion = True
+active_beams = np.array([1,1,1,1], dtype=np.bool)
+nb_block = (0, 1000)
+nbimg = 100
+save_data = True
+path = '/mnt/96980F95980F72D3/glint_data/simu_ron_regime/'
+namefile = 'pure_injection'
 auto_talk_beams = [0, 1]
-scanned_segment = 2
+scanned_segment = 0
 scan_bounds = (-2500, 2500) # In nm
 
 # =============================================================================
@@ -61,8 +63,8 @@ DIT = 1/1394 # in sec
 Ndark = 1500 # in e-/px/s
 Ndark *= DIT # in e-/px/fr
 sigma_ron = 30. # in e-/px/fr
+wl_stop = 1660
 
-wl_offset = 28 # in pixel, shift of the bandwidth on the detecotr hence a blank in a part of it
 detector_size = (344, 96) #resp. position axes and wavelength
 
 channel_width = bandwidth / (detector_size[1])
@@ -74,6 +76,7 @@ offset = 2750
 step = 5 #In nm
 wl_scale = np.arange(wl_min, wl_max+5,5, dtype=np.float64) #In nm
 wl_scale = wl_scale[::-1]
+wl_offset = np.where(wl_scale>wl_stop)[0][-1]+1 # in pixel, shift of the bandwidth on the detecotr hence a blank in a part of it
 
 wave_number = 1/wl_scale # In microns^-1
 position_scale = np.arange(0, detector_size[0]) #In pixel
@@ -86,10 +89,6 @@ liste_pupils = np.arange(nb_pupils) # Id of the pupils
 diam = 1.075 #in meter
 central_obs = 0.
 surface = np.pi * (diam**2-central_obs**2) / 4 #en m^2
-if activate_transmission:
-    transmission = np.array([4.74e-6, 2.20e-6, 4.66e-6, 3.92e-6])*300
-else:
-    transmission = np.ones(4)
 
 # =============================================================================
 # Properties of the integrated optics and injection
@@ -137,8 +136,8 @@ else:
 # =============================================================================
 piston_mu = 0
 piston_shift, jump = wl0/2, 0.
-piston_std = 40.
-strehl_mean, strehl_std = 0.7, 0.05
+piston_std = 0.
+strehl_mean, strehl_std = 0.5, 0.5
 r0 = 0.3 # @ 500 nm, in meter, roughly sr=0.9..0.95 at 1.5 microns
 wl_wfs = 500e-9 # wavelength of the wavefront sensor
 wind_speed = 10 # wind speed in m/s
@@ -178,10 +177,11 @@ baselines = np.array([5.55, 3.2, 4.65, 6.45, 5.68, 2.15])
 #==============================================================================
 # Stars
 #==============================================================================
-mag = -1.57
-ud_diam = 0. # in mas
+mag = -1.5
+ud_diam = 20. # in mas
 if ud_diam != 0:
-    visibility = createObject('ud', ud_diam, wl0*1e-9)
+    visibility, baselines = createObject('ud', ud_diam, wl0*1e-9)
+    visibility = np.array([visibility[0], visibility[4], visibility[2], visibility[1], visibility[5], visibility[3]])
 else:
     visibility = np.ones(6)
 na = (1-visibility) / (1+visibility)
@@ -202,11 +202,18 @@ anti_null_channels = np.transpose(anti_null_channels, [0, 2, 1])
 #anti_null_channels /= np.sum(anti_null_channels, axis=(-1,-2))[:,None,None]
 
 if activate_zeta:
-    zeta_minus, zeta_plus = setZetaCoeff(wl_scale, '/mnt/96980F95980F72D3/glint/reduction/calibration_params_simu/zeta_coeff.hdf5', save=False, plot=False)
+    zeta_minus, zeta_plus = setZetaCoeff(wl_scale, 'zeta_coeff.hdf5', wl_stop, save=False, plot=False)
 else:
-    zeta_minus = np.ones((6,2,96))
-    zeta_plus = np.ones((6,2,96))
-    
+    zeta_minus = np.ones((6,2,96))*0.5
+    zeta_plus = np.ones((6,2,96))*0.5
+                      
+transmission = np.array([1/(1 + zeta_minus[0,0] + zeta_plus[0,0] + zeta_minus[1,0] + zeta_plus[1,0] + zeta_minus[2,0] + zeta_plus[2,0]),
+                         1/(1 + zeta_minus[0,1] + zeta_plus[0,1] + zeta_minus[3,0] + zeta_plus[3,0] + zeta_minus[4,0] + zeta_plus[4,0]),
+                         1/(1 + zeta_minus[1,1] + zeta_plus[1,1] + zeta_minus[3,1] + zeta_plus[3,1] + zeta_minus[5,0] + zeta_plus[5,0]),
+                         1/(1 + zeta_minus[2,1] + zeta_plus[2,1] + zeta_minus[4,1] + zeta_plus[4,1] + zeta_minus[5,1] + zeta_plus[5,1])])
+transmission[~active_beams] = 0
+transmission[transmission==1] = 0
+
 if activate_scan_null:
     scan_range = np.linspace(scan_bounds[0], scan_bounds[1], 1001)
     nbimg = scan_range.size
@@ -221,6 +228,12 @@ if activate_scan_null:
     visibility[:] = 1.
     na[:] = 0.
     
+liste_iminus = []
+liste_iplus = []
+liste_photo = []
+liste_avg = []
+control_avg = []
+
 start0 = time()
 for bl in range(*nb_block):
     start = time()
@@ -245,7 +258,7 @@ for bl in range(*nb_block):
             strehl = np.random.normal(strehl_mean, strehl_std, size=(nb_pupils, nbimg))
             while np.min(strehl) < 0 or np.max(strehl) > 1:
                 idx = np.where((strehl<0)|(strehl>1))
-                strehl[idx] = np.random.normal(0.5, 0.12, size=idx[0].size)
+                strehl[idx] = np.random.normal(strehl_mean, strehl_std, size=idx[0].size)
         else:
             strehl = np.ones((nb_pupils, nbimg))
         
@@ -260,8 +273,8 @@ for bl in range(*nb_block):
         else:
             diff_phases = np.zeros((6, nbimg))
 
-    strehl[0] = np.linspace(0.1, 1., nbimg)
-    np.savetxt(path+'strehl.txt', strehl)
+    # strehl[0] = np.linspace(0.1, 1., nbimg)
+    # np.savetxt(path+'strehl.txt', strehl)
     rho = rho0 * strehl
     opd = np.ones((int(comb(nb_pupils, 2)), nbimg))
     
@@ -277,7 +290,7 @@ for bl in range(*nb_block):
 
     opd_ramp = np.linspace(-wl0-opd[0,0], wl0-opd[0,0],nbimg, endpoint=False)
     # opd[0] += opd_ramp
-    np.savetxt(path+'opd.txt', opd_ramp)
+    # np.savetxt(path+'opd.txt', opd_ramp)
     
     image_clean = np.zeros((nbimg, detector_size[0], detector_size[1]))
     
@@ -287,15 +300,20 @@ for bl in range(*nb_block):
             flat_spectrum = np.ones(detector_size[1])
             flat_spectrum[:wl_offset] = 0.
             spectrum = skewedGaussian(wl_scale, 1., wl_scale.mean(), 50, -1)
-            spectrum = spectrum / np.sum(spectrum) * np.sum(flat_spectrum)
+            spectrum = spectrum / np.sum(spectrum)
             wl_offset = 0
             plt.figure()
-            plt.plot(wl_scale, spectrum)
+            plt.plot(wl_scale, spectrum, lw=3)
             plt.grid()
-            plt.title('Spectrum')
+            plt.xticks(size=25);plt.yticks(size=25)
+            plt.title('Spectrum', size=35)
+            plt.ylabel('Normalised intensity', size=30)
+            plt.xlabel('Wavelength (nm)', size=30)
+            plt.tight_layout()
         else:
             spectrum = np.ones(detector_size[1])
             spectrum[:wl_offset] = 0.
+            spectrum = spectrum / spectrum.sum()
             
         for i in liste_pupils:
             N = QE * surface * channel_width * DIT * np.power(10, -0.4*mag) * flux_ref * wl_scale.mean()*1.E-9 /(h*c) * spectrum
@@ -361,6 +379,18 @@ for bl in range(*nb_block):
     data_noisy.addNoise(Ndark, gainsys, offset, sigma_ron, active=select_noise, convert=conversion)
     data = data_noisy.output
     
+    avg = data[:,:,:20].mean()
+    output = data - avg
+    p = np.array([output[:,int(round(photo_pos_i)):int(round(photo_pos_i+1)),:].sum(axis=1) for photo_pos_i in photo_pos])
+    p2 = np.array([image_clean[:,int(round(photo_pos_i)):int(round(photo_pos_i+1)),:].sum(axis=1) for photo_pos_i in photo_pos])
+    liste_photo.append(p)
+    Iminus = np.array([output[:,int(round(null_output_pos_i)):int(round(null_output_pos_i+1)),:].sum(axis=1) for null_output_pos_i in null_output_pos])
+    Iplus = np.array([output[:,int(round(anti_null_output_pos_i)):int(round(anti_null_output_pos_i+1)),:].sum(axis=1) for anti_null_output_pos_i in anti_null_output_pos])
+    liste_iminus.append([Iminus[0], Iminus[3], Iminus[2], Iminus[5], Iminus[1], Iminus[4]])
+    liste_iplus.append([Iplus[0], Iplus[3], Iplus[2], Iplus[5], Iplus[1], Iplus[4]])
+    liste_avg.append(avg)
+    control_avg.append(output[:,:20,:].mean())
+    
     # =============================================================================
     # Save data
     # =============================================================================
@@ -370,12 +400,12 @@ for bl in range(*nb_block):
             os.makedirs(path)
             
         if not activate_dark_only:
-            path2 = path + 'simu_'+str(mag)+'_%04d.mat'%(bl+1)
+            path2 = path + namefile +'_%04d.mat'%(bl+1)
         else:
             path2 = path + 'dark_%04d.mat'%(bl+1)
         
         date = datetime.datetime.utcnow().isoformat()
-        np.savetxt(path+'opd_range_%04d.txt'%(bl+1), opd)
+        # np.savetxt(path+'opd_range_%04d.txt'%(bl+1), opd)
         save(np.transpose(data, axes=(0,2,1)), path2, date, DIT, na, mag, nbimg, \
              [piston_shift, piston_std, jump], [strehl_mean, strehl_std],\
              activate_dark_only, activate_turbulence_injection, activate_turbulence_piston, 
@@ -387,8 +417,12 @@ for bl in range(*nb_block):
 stop0 = time()
 print('Total last: %.3f'%(stop0-start0))
 
+liste_photo = np.array(liste_photo)
+liste_iminus = np.array(liste_iminus)
+liste_iplus = np.array(liste_iplus)
+
 # =============================================================================
-# Miscelleanous
+# Scan of fringes
 # =============================================================================
 output = data - data[:,:,:10].mean()
 Iminus = np.array([output[:,int(round(null_output_pos_i)):int(round(null_output_pos_i+1)),:].sum(axis=1) for null_output_pos_i in null_output_pos])
@@ -422,65 +456,50 @@ if activate_scan_null:
         plt.legend(loc='best')
     plt.tight_layout() 
 
-#wl_offset = 28
-#wl = wl_scale[wl_offset:]
-#wl0 = np.mean(wl)
-#dwl = max(wl) - min(wl)
-#x_axis = opd[0]
-#i=0
-#scan_antinull = antinull[i,:,wl_offset:]
-#p1 = p[null_photo_map[i,0],:,wl_offset:] * zeta_plus[i, 0, wl_offset:]
-#p2 = p[null_photo_map[i,1],:,wl_offset:] * zeta_plus[i, 1, wl_offset:]
-#scan_antinull = (scan_antinull - p1 - p2) / np.sqrt(4*p1*p2)
-#
-#fft = np.fft.fftshift(np.fft.fft(scan_antinull, norm='ortho'))
-#dsp = abs(fft)**2
-#opd_axis = (np.arange(dsp.shape[1])-dsp.shape[1]/2)*wl0**2/dwl
-#
-#plt.figure()
-#plt.plot(opd_axis, dsp.T)
-#plt.grid()
-#
-#dsp2 = dsp[:,opd_axis>=0]
-#opd_axis2 = opd_axis[opd_axis>=0]
-#opd_axis2 = np.array([opd_axis2]*10)
-#
-#weights = dsp2/dsp2.sum(axis=1)[:,None]
-#photocenter = np.average(opd_axis2, weights=weights, axis=1)
-#print(photocenter)
+# =============================================================================
+# Miscelleanous
+# =============================================================================
+# liste_photo = liste_photo[:,:,:,(wl_scale>=1400)&(wl_scale<=1650)].sum(axis=-1)
+# liste_iminus = liste_iminus[:,:,:,(wl_scale>=1400)&(wl_scale<=1650)].sum(axis=-1)
+# liste_iplus = liste_iplus[:,:,:,(wl_scale>=1400)&(wl_scale<=1650)].sum(axis=-1)
 
-#for i in range(min(5,nbimg)):
-#    plt.figure()
-#    plt.subplot(121)
-#    plt.imshow(data[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0],) 
-#    plt.colorbar()
-#    plt.subplot(122)
-#    plt.imshow(image_clean[i], interpolation='none', aspect='auto', extent=[wl_scale[0], wl_scale[-1], detector_size[0], 0]) 
-#    plt.colorbar()
-#    
-#    maxi = max(p.max(), Iminus.max(), Iplus.max())
-#    plt.figure(figsize=(19.20,10.80))
-#    for j in range(4):
-#        plt.subplot(4,4,j+1)
-#        plt.plot(wl_scale, p[j,i])
-#        plt.grid()
-#        plt.ylim(-5, maxi*1.05)
-#        plt.title('P%s'%(j+1))
-#    for j in range(4,10):
-#        plt.subplot(4,4,j+1)
-#        plt.plot(wl_scale, Iminus[j-4,i])
-#        plt.grid()
-#        plt.ylim(-5, maxi*1.05)
-#        plt.title(null_labels[j-4])
-#    for j in range(10,16):
-#        plt.subplot(4,4,j+1)
-#        plt.plot(wl_scale, Iplus[j-10,i])
-#        plt.grid()
-#        plt.ylim(-5, maxi*1.05)
-#        plt.title('A'+null_labels[j-10])
-#    plt.tight_layout()
+pA = liste_photo[:,0]
+pB = liste_photo[:,1]
+destructif = liste_iminus[:,0]
+constructif = liste_iplus[:,0]
+ddm = opd_bias[0] + 2*(segment_positions[0] - segment_positions[1]) # N1: 12
+reconstruit_plus = pA * zeta_plus[0,0] + pB * zeta_plus[0,1] + \
+                    2 * (pA * pB)**0.5 * (zeta_plus[0,0] * zeta_plus[0,1])**0.5 * np.sin(2*np.pi/wl_scale*ddm)
+reconstruit_moins = pA * zeta_minus[5,0] + pB * zeta_minus[5,1] + \
+                    2 * (pA * pB)**0.5 * (zeta_minus[0,0] * zeta_minus[0,1])**0.5 * np.sin(2*np.pi/wl_scale*ddm)
 
+destructif = destructif[:,:,(wl_scale>=1525)&(wl_scale<=1575)].sum(axis=-1)
+constructif = constructif[:,:,(wl_scale>=1525)&(wl_scale<=1575)].sum(axis=-1)
+reconstruit_plus = reconstruit_plus[:,:,(wl_scale>=1525)&(wl_scale<=1575)].sum(axis=-1)
+reconstruit_moins = reconstruit_moins[:,:,(wl_scale>=1525)&(wl_scale<=1575)].sum(axis=-1)
 
+destructif = destructif.reshape(-1)
+constructif = constructif.reshape(-1)
+reconstruit_plus = reconstruit_plus.reshape(-1)
+reconstruit_moins = reconstruit_moins.reshape(-1)
+
+destructif = destructif[~np.isnan(destructif)]
+constructif = constructif[~np.isnan(constructif)]
+reconstruit_plus = reconstruit_plus[~np.isnan(reconstruit_plus)]
+reconstruit_moins = destructif[~np.isnan(reconstruit_moins)]
+
+histod = np.histogram(destructif, int(destructif.size**0.5), density=True)
+histoc = np.histogram(constructif, int(constructif.size**0.5), density=True)
+histord = np.histogram(reconstruit_moins, int(reconstruit_moins.size**0.5), density=True)
+historc = np.histogram(reconstruit_plus, int(reconstruit_plus.size**0.5), density=True)
+
+plt.figure()
+plt.plot(histod[1][:-1], histod[0], '.', label='I-')
+plt.plot(histord[1][:-1], histord[0], '-', label='I- recons')
+plt.plot(histoc[1][:-1], histoc[0], '.', label='I+')
+plt.plot(historc[1][:-1], historc[0], '-', label='I+ recons')
+plt.legend(loc='best')
+print(reconstruit_plus.mean()/constructif.mean())
 from matplotlib import animation
 fig = plt.figure()
 ax = plt.axes()
@@ -498,88 +517,144 @@ def animate(i):
     return [im] + [time_text]
 
 anim = animation.FuncAnimation(fig, animate, init_func=init, frames=output.shape[0], interval=10, blit=True)
-
-histo = np.histogram(2*np.pi/wl0*opd[0], int(opd[0].size**0.5), density=True)
-plt.figure()
-plt.plot(histo[1][:-1], histo[0])
-plt.grid()
-plt.title('Histogram of OPD (N1)')
-
-plt.figure()
-for i in range(6):
-    plt.subplot(3,2,i+1)
-    plt.plot(null[i])
-    plt.grid()
-    plt.title('Null %s'%(i+1))
+#
+#histo = np.histogram(2*np.pi/wl0*opd[0], int(opd[0].size**0.5), density=True)
+#plt.figure()
+#plt.plot(histo[1][:-1], histo[0])
+#plt.grid()
+#plt.title('Histogram of OPD (N1)')
+#
+#plt.figure()
+#for i in range(6):
+#    plt.subplot(3,2,i+1)
+#    plt.plot(null[i])
+#    plt.grid()
+#    plt.title('Null %s'%(i+1))
 
     
-#mask = np.where((wl_scale>=1400)&(wl_scale<=1650))[0]
-#wl = wl_scale[mask]
-#
-#def modelNull(wl, opd):#, phase):
-#    global lc, i
-#    global zeta_minus_A, zeta_minus_B, zeta_plus_A, zeta_plus_B
-#    global data_IA, data_IB
-#    
-#    phase=1.3948671381938684
-#    IAminus = data_IA[i] * zeta_minus_A
-#    IBminus = data_IB[i] * zeta_minus_B
-#    IAplus = data_IA[i] * zeta_plus_A
-#    IBplus = data_IB[i] * zeta_plus_B
-#    
-#    Iminus = IAminus + IBminus - \
-#        2 * np.sqrt(IAminus * IBminus) * np.sin(2*np.pi/wl * opd + phase) * np.sinc(opd/lc)
-#    Iplus = IAplus + IBplus + \
-#        2 * np.sqrt(IAplus * IBplus) * np.sin(2*np.pi/wl * opd + phase) * np.sinc(opd/lc)
-#    
-#    null = Iminus/Iplus
-#    return null
-#    
-#
-#from scipy.optimize import curve_fit
-#lc = 496966
-#
-#null = Iminus / Iplus
-#null = null
-#
-#zeta_minus_A, zeta_minus_B = zeta_minus[5]
-#zeta_plus_A, zeta_plus_B = zeta_plus[5]
-#data_IA, data_IB = p[2], p[3]
-#
-#null = null[:,:,mask].mean(axis=1).reshape((6,1,-1))
-#zeta_minus_A, zeta_minus_B = zeta_minus_A[mask], zeta_minus_B[mask]
-#zeta_plus_A, zeta_plus_B = zeta_plus_A[mask], zeta_plus_B[mask]
-#data_IA, data_IB = data_IA[:,mask].mean(axis=0).reshape((1,-1)), data_IB[:,mask].mean(axis=0).reshape((1,-1))
-#Iminus, Iplus  = Iminus[:,:,mask].mean(axis=1).reshape((6,1,-1)), Iplus[:,:,mask].mean(axis=1).reshape((6,1,-1))
-#
-#liste = []
-#for k in range(1):
-#    i = k
-#    popt, pcov = curve_fit(modelNull, wl, null[5,k], p0=[0.], bounds=(-1000,1000))
-#    print(k, opd[5,0], popt)
-#    liste.append(opd[5,0]-popt)
-
-#plt.figure()
-#plt.subplot(2,2,1)
-#plt.title('p3')
-#plt.plot(wl, data_IA);plt.grid()
-#plt.ylim(0, 3500)
-#plt.subplot(2,2,2)
-#plt.title('p4')
-#plt.plot(wl, data_IB);plt.grid()
-#plt.ylim(0, 3500)
-#plt.subplot(2,2,3)
-#plt.title('I minus')
-#plt.plot(wl, Iminus[5]);plt.grid()
-#plt.subplot(2,2,4)
-#plt.title('I plus')
-#plt.plot(wl, Iplus[5]);plt.grid()
-#
-#    if k % 10 ==0:
-#        plt.figure()
-#        plt.title(k)
-#        plt.plot(wl, null[5,k])
-#        plt.plot(wl, modelNull(wl, opd[5,i]))
-#        plt.plot(wl, modelNull(wl, *popt))
-#        plt.grid()
+# # =============================================================================
+# # Fringe tracking
+# # =============================================================================
+# def binning(arr, binning, axis=0, avg=False):
+#     """
+#     Bin frames together
+    
+#     :Parameters:
+#         **arr**: nd-array
+#             Array containing data to bin
+#         **binning**: int
+#             Number of frames to bin
+#         **axis**: int
+#             axis along which the frames are
+#         **avg**: bol
+#             If ``True``, the method returns the average of the binned frame.
+#             Otherwise, return its sum.
+            
+#     :Attributes:
+#         Change the attributes
         
+#         **data**: ndarray 
+#             datacube
+#     """
+#     if binning is None:
+#         binning = arr.shape[axis]
+        
+#     shape = arr.shape
+#     crop = shape[axis]//binning*binning # Number of frames which can be binned respect to the input value
+#     arr = np.take(arr, np.arange(crop), axis=axis)
+#     shape = arr.shape
+#     if axis < 0:
+#         axis += arr.ndim
+#     shape = shape[:axis] + (-1, binning) + shape[axis+1:]
+#     arr = arr.reshape(shape)
+#     if not avg:
+#         arr = arr.sum(axis=axis+1)
+#     else:
+#         arr = arr.mean(axis=axis+1)
+    
+#     return arr
+
+# wl_min = 1450
+# wl_max = 1650
+# wl = wl_scale[(wl_scale>=wl_min)&(wl_scale<=wl_max)]
+# Iminus = Iminus[:,:,(wl_scale>=wl_min)&(wl_scale<=wl_max)]
+# Iplus = Iplus[:,:,(wl_scale>=wl_min)&(wl_scale<=wl_max)]
+# nb_spec_chan = 2
+# iminus = Iminus[0]
+# iplus = Iplus[0]
+
+# iminus4 = binning(iminus, iminus.shape[1]//nb_spec_chan, 1, True)[::-1]
+# iplus4 = binning(iplus, iplus.shape[1]//nb_spec_chan, 1, True)[::-1]
+# wl_4channels = binning(wl, wl.size//nb_spec_chan, 0, True)[::-1]
+
+# intranull = np.array([(iminus4[:,0] - iminus4[:,-1])/(iminus4[:,0]+iminus4[:,-1]), (iplus4[:,0] - iplus4[:,-1])/(iplus4[:,0]+iplus4[:,-1])])
+# visi = (iplus4-iminus4)/(iplus4+iminus4)
+
+# # np.savez(path+'opd_zeta_nospectrum.npz', intranull=intranull, visi=visi, strehl=strehl[0], opd=opd_ramp)
+# a = np.load(path+'injection_nozeta_nospectrum.npz')
+
+# plt.figure(figsize=(19.2, 10.8))
+# plt.plot(strehl[0], intranull[0], '.', markersize=10, label=r'$\frac{I^{-}_{%s} - I^{-}_{%s}}{I^{-}_{%s} + I^{-}_{%s}}$ (Skewed spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.plot(strehl[0], intranull[1], '.', markersize=10, label=r'$\frac{I^{+}_{%s} - I^{+}_{%s}}{I^{+}_{%s} + I^{+}_{%s}}$ (Skewed spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.gca().set_prop_cycle(None)
+# plt.plot(a['strehl'], a['intranull'][0], '+', markersize=10, label=r'$\frac{I^{-}_{%s} - I^{-}_{%s}}{I^{-}_{%s} + I^{-}_{%s}}$ (Flat spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.plot(a['strehl'], a['intranull'][1], '+', markersize=10, label=r'$\frac{I^{+}_{%s} - I^{+}_{%s}}{I^{+}_{%s} + I^{+}_{%s}}$ (Flat spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.grid()
+# plt.xlim(0)
+# plt.ylim(-1.05,1.2)
+# plt.legend(loc='best', fontsize=25, ncol=2)
+# plt.xticks(size=30);plt.yticks(size=30)
+# plt.xlabel('Strehl ratio', size=35)
+# plt.ylabel('Amplitude (AU)', size=35)
+# plt.tight_layout()
+
+# plt.figure(figsize=(19.2, 10.8))
+# plt.plot(opd_ramp, intranull[0], '.', markersize=10, label=r'$\frac{I^{-}_{%s} - I^{-}_{%s}}{I^{-}_{%s} + I^{-}_{%s}}$ (Skewed spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.plot(opd_ramp, intranull[1], '.', markersize=10, label=r'$\frac{I^{+}_{%s} - I^{+}_{%s}}{I^{+}_{%s} + I^{+}_{%s}}$ (Skewed spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.gca().set_prop_cycle(None)
+# plt.plot(a['opd'], a['intranull'][0], '+', markersize=10, label=r'$\frac{I^{-}_{%s} - I^{-}_{%s}}{I^{-}_{%s} + I^{-}_{%s}}$ (Flat spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.plot(a['opd'], a['intranull'][1], '+', markersize=10, label=r'$\frac{I^{+}_{%s} - I^{+}_{%s}}{I^{+}_{%s} + I^{+}_{%s}}$ (Flat spectrum)'%(*np.round(wl_4channels), *np.round(wl_4channels)))
+# plt.grid()
+# plt.ylim(-1,2)
+# plt.legend(loc='best', fontsize=30, ncol=2)
+# plt.xticks(size=30);plt.yticks(size=30)
+# plt.xlabel('Gap between current OPD and the nominal one (in nm)', size=35)
+# plt.ylabel('Amplitude (AU)', size=35)
+# # plt.ylim(-1,1)
+# plt.tight_layout()
+    
+# plt.figure(figsize=(19.2, 10.8))
+# plt.plot(strehl[0], visi[:,0]/visi[:,-1], '.', markersize=10, label=r'$\frac{V_{%s}}{V_{%s}}$ (Skewed spectrum)'%(np.round(wl_4channels[0]), np.round(wl_4channels[-1])))
+# plt.plot(a['strehl'], a['visi'][:,0]/a['visi'][:,-1], '.', markersize=10, label=r'$\frac{V_{%s}}{V_{%s}}$ (Flat spectrum)'%(np.round(wl_4channels[0]), np.round(wl_4channels[-1])))
+# plt.grid()
+# plt.xlim(0)
+# plt.ylim(-1.05, 1.2)
+# plt.legend(loc='best', fontsize=30)
+# plt.xticks(size=30);plt.yticks(size=30)
+# plt.xlabel('Strehl ratio', size=35)
+# plt.ylabel('Amplitude (AU)', size=35)
+# plt.tight_layout()
+
+# plt.figure(figsize=(19.2, 10.8))
+# plt.plot(opd_ramp, visi[:,0]/visi[:,-1], '.', markersize=10, label=r'$\frac{V_{%s}}{V_{%s}}$ (Skewed spectrum)'%(np.round(wl_4channels[0]), np.round(wl_4channels[-1])))
+# plt.plot(a['opd'], a['visi'][:,0]/a['visi'][:,-1], '.', markersize=10, label=r'$\frac{V_{%s}}{V_{%s}}$ (Flat spectrum)'%(np.round(wl_4channels[0]), np.round(wl_4channels[-1])))
+# plt.grid()
+# plt.ylim(-1, 2)
+# plt.legend(loc='best', fontsize=30)
+# plt.xticks(size=30);plt.yticks(size=30)
+# plt.xlabel('Gap between current OPD and the nominal one (in nm)', size=35)
+# plt.ylabel('Amplitude (AU)', size=35)
+# # plt.ylim(-1,1)
+# plt.tight_layout()
+
+
+# # plt.figure(figsize=(19.2, 10.8))
+# # plt.plot(strehl[0], intranull[1]/a['intranull'][1], '.', markersize=10)
+# # plt.grid()
+# # plt.xlim(0)
+# # # plt.ylim(-0.05,1.05)
+# # plt.legend(loc='best', fontsize=30)
+# # plt.xticks(size=30);plt.yticks(size=30)
+# # plt.xlabel('Strehl ratio', size=35)
+# # plt.ylabel('Amplitude (AU)', size=35)
+# # plt.tight_layout()

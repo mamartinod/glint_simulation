@@ -10,6 +10,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class Noising:
+    """
+    Class simulating the detector noise and photon noise.
+    The output is a frame similar (as much as possible) as 
+    the frame from the GLINT's camera.
+    """
     def __init__(self, nbimg, inpt='mock', xsize=None, ysize=None):
         if inpt != 'mock':
             self.image = inpt
@@ -128,7 +133,19 @@ class goas(object):
         
     def generateAtmosphere(self, r0, wavel0, turbulence_switch):
         """
-        Generate an atmospheric turbulence according to a Kolmogorov model
+        Generate an atmospheric turbulence according to a Kolmogorov model.
+        This class contains methods to extract the actual visibility of the object
+        and the phase of the wavefronts to put into the interferometric equations.
+        It may be useful for a realistic simulation where wavefront are propagated.
+        For simpler simulation where injections are calculated analytically
+        and where the only component of the differential phase is kept 
+        (thanks to singlemode optics!), reading the RMS of the phase masks 
+        (this assumes low turbulence ie Streh > 20%, Ross et al. 2009) and
+        getting the difference of average values of two phases masks is largely sufficient.
+        Therefore, only atm_screen is useful.
+        
+        NOTE: the methods have not been checked yet, I don't know if they work despite the physics
+        behind these codes is solid.
         
         :Parameters:
             * **r0**: float, Fried's parameter in meter.

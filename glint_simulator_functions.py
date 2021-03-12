@@ -14,6 +14,7 @@ import h5py
 import os
 from scipy.io import savemat
 import scipy.special as sp
+from scipy.interpolate import interp1d
 
 def doubleGaussCdf(x, mu1, mu2, sig, A):
     return 1/(1+A) * ndtr((x-mu1)/(sig)) + A/(1+A) * ndtr((x-mu2)/(sig))
@@ -111,7 +112,7 @@ def save(arr, path, date, DIT, na, mag, nbimg, piston, strehl, dark_only_switch,
         f.attrs['activate_opd_bias'] = activate_opd_bias
         f.create_dataset('imagedata', data=arr)
 
-def setZetaCoeff(wl_scale, path, save, plot):
+def setZetaCoeff(wl_scale, path, wl_stop, save, plot):
     with h5py.File(path, 'r') as zeta0:
         wl = np.array(zeta0['wl_scale'])
         
@@ -128,8 +129,8 @@ def setZetaCoeff(wl_scale, path, save, plot):
                       [zeta0['b2null12'], zeta0['b4null12']],
                       [zeta0['b3null10'], zeta0['b4null10']]])
         
-        zeta_minus = np.array([[np.interp(wl_scale[::-1], wl[::-1], selt[::-1]) for selt in elt] for elt in zeta_minus0])
-        zeta_plus = np.array([[np.interp(wl_scale[::-1], wl[::-1], selt[::-1]) for selt in elt] for elt in zeta_plus0])
+        zeta_minus = np.array([[np.interp(wl_scale[::-1], wl[::-1][(wl[::-1]<=wl_stop)], selt[::-1][(wl[::-1]<=wl_stop)], left=0, right=0) for selt in elt] for elt in zeta_minus0])
+        zeta_plus = np.array([[np.interp(wl_scale[::-1], wl[::-1][(wl[::-1]<=wl_stop)], selt[::-1][(wl[::-1]<=wl_stop)], left=0, right=0) for selt in elt] for elt in zeta_plus0])
         
         zeta_minus = zeta_minus[:,:,::-1]
         zeta_plus = zeta_plus[:,:,::-1]
@@ -251,12 +252,12 @@ def createObject(kind, *args):
         bl = np.hypot(baselines[:,0], baselines[:,1])
         diameter, wl = args
         vis = createUD(bl, diameter, wl)
-        return abs(vis)
+        return abs(vis), bl
     elif kind == 'binary':
         diam1, diam2, F1, F2, separation, angular_position, lamb = args
         u, v = baselines[:,0]/lamb, baselines[:,1]/lamb
         vis, phase = createBinary(diam1, diam2, F1, F2, separation, angular_position, u, v, lamb)
-        return vis, phase
+        return vis, phase, baselines
     else:
         raise NameError('Unknown kind of object to create. Please choose between \'ud\' and \'binary\'.')
     
